@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import * as cheerio from 'cheerio';
 
 // Helper function to extract keywords from a job description
 function extractKeywords(description) {
@@ -11,6 +12,32 @@ function extractKeywords(description) {
         .filter(word => !stopWords.has(word) && word.length > 2);
         
     return [...new Set(keywords)].join(' '); // Return unique keywords as a string
+}
+
+// NEW: Helper function to scrape search results from your website
+async function scrapeSearchResults(query) {
+    const searchUrl = `https://attradeprice.co.uk/?s=${encodeURIComponent(query)}&post_type=product`;
+    try {
+        const response = await fetch(searchUrl);
+        if (!response.ok) {
+            console.error(`Failed to fetch search results: ${response.statusText}`);
+            return [];
+        }
+        const html = await response.text();
+        const $ = cheerio.load(html);
+        const products = [];
+        $('.product-wrapper').each((i, el) => {
+            const title = $(el).find('.wd-entities-title a').text().trim();
+            const url = $(el).find('.wd-entities-title a').attr('href');
+            if (title && url) {
+                products.push({ title, url });
+            }
+        });
+        return products;
+    } catch (error) {
+        console.error("Error scraping website:", error);
+        return [];
+    }
 }
 
 
@@ -27,38 +54,34 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Missing jobDescription in request body' });
     }
 
+    // --- New Web Scraping Logic ---
+    const keywords = extractKeywords(jobDescription);
+    const searchResults = await scrapeSearchResults(keywords);
+
     const apiKey = process.env.VITE_GOOGLE_API_KEY;
     if (!apiKey) {
       throw new Error("API key not found.");
     }
 
     const genAI = new GoogleGenerativeAI(apiKey);
-    
-    const keywords = extractKeywords(jobDescription);
-    const searchQuery = `site:attradeprice.co.uk ${keywords} OR "natural stone paving" OR "pointing compound"`;
-    
-    const model = genAI.getGenerativeModel({ 
-        model: "gemini-1.5-flash",
-        tools: [{ "google_search_retrieval": {}}]
-    });
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
     const prompt = `
       You are an expert quantity surveyor for a UK-based building materials supplier called "At Trade Price".
-      Your task is to analyze a customer's job description. To do this, you MUST first perform a Google Search on the attradeprice.co.uk website to find relevant products.
-
-      **Search Query to Use:**
-      "${searchQuery}"
+      Your task is to analyze a customer's job description and a provided list of relevant products scraped directly from the attradeprice.co.uk website.
 
       **Customer Job Description:**
       "${jobDescription}"
 
+      **Scraped Products from attradeprice.co.uk:**
+      ${JSON.stringify(searchResults, null, 2)}
+
       **Instructions & Rules:**
-      1.  Execute a search using the provided query to find products on the website.
-      2.  **Analyze the search results VERY carefully.** The search results contain the real product names available on the website.
-      3.  Based on the job description, calculate the required quantity for each necessary material. Assume a 10% waste factor for materials like paving and aggregates.
-      4.  **CRITICAL:** If you find multiple suitable products for a single material requirement (e.g., different colors of "pointing compound" or different types of "natural stone"), you MUST include them as an array of 'options'. **You MUST use the exact product titles from the search results for the 'name' in each option.** Do not invent or use example names.
-      5.  If you identify a material needed for the job (e.g., "MOT Type 1 Sub-base", "Cement") but you **cannot** find a specific product for it in the search results, you MUST still include it in the material list as a single item (not with options). For these items, set the 'name' to describe the material and add "(to be quoted)" at the end.
-      6.  Generate a JSON object with the following exact structure.
+      1.  **Analyze the provided "Scraped Products" list.** This is the ONLY source of available products.
+      2.  Based on the job description, calculate the required quantity for each necessary material. Assume a 10% waste factor for materials like paving and aggregates.
+      3.  **CRITICAL:** If you find multiple suitable products for a single material requirement (e.g., different colors of "pointing compound" or different types of "natural stone"), you MUST include them as an array of 'options'. **You MUST use the exact product titles from the scraped data for the 'name' in each option.**
+      4.  If you identify a material needed for the job (e.g., "MOT Type 1 Sub-base", "Cement") but you **cannot** find a specific product for it in the scraped data, you MUST still include it in the material list as a single item (not with options). For these items, set the 'name' to describe the material and add "(to be quoted)" at the end.
+      5.  Generate a JSON object with the following exact structure.
           {
             "materials": [
               { 
@@ -67,8 +90,8 @@ export default async function handler(req, res) {
                 "quantity": <calculated_quantity>, 
                 "unit": "<standard_unit>",
                 "options": [
-                    { "id": "<product_sku_or_url_1>", "name": "<EXACT Product Name from Search Result 1>" },
-                    { "id": "<product_sku_or_url_2>", "name": "<EXACT Product Name from Search Result 2>" }
+                    { "id": "<product_url_1>", "name": "<EXACT Product Name from Scraped Data 1>" },
+                    { "id": "<product_url_2>", "name": "<EXACT Product Name from Scraped Data 2>" }
                 ]
               },
               ...
@@ -78,7 +101,7 @@ export default async function handler(req, res) {
               "considerations": ["<consideration_1>", "<consideration_2>", ...]
             }
           }
-      7.  Your entire response MUST be only the raw JSON object. Do not include any extra text, explanations, or markdown formatting. The response must start with { and end with }.
+      6.  Your entire response MUST be only the raw JSON object. Do not include any extra text, explanations, or markdown formatting. The response must start with { and end with }.
     `;
 
     const result = await model.generateContent(prompt);
