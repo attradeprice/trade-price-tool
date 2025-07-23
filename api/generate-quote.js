@@ -1,80 +1,35 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import * as cheerio from 'cheerio'; // Import cheerio
 
 // Helper function to extract keywords from a job description
 function extractKeywords(description) {
     const lowerDesc = description.toLowerCase();
     const stopWords = new Set(['a', 'an', 'the', 'in', 'on', 'for', 'with', 'i', 'want', 'to', 'build', 'and', 'is', 'it', 'will', 'be', 'area', 'size', 'using', 'out', 'of', 'i\'m', 'looking', 'need', 'needs', 'a', 'an', 'the', 'some', 'any', 'for', 'to', 'with', 'in', 'on', 'at', 'by', 'from', 'about', 'as', 'of', 'or', 'and', 'but', 'not', 'that', 'this', 'these', 'those', 'can', 'will', 'should', 'would', 'could', 'materials', 'product', 'products', 'items', 'stuff', 'my', 'job', 'project', 'plan', 'specifications']);
     
-    // Improved regex to handle common contractions and ensure clean words
     const keywords = lowerDesc
-        .replace(/[^\w\s']/g, '') // remove punctuation except apostrophes
+        .replace(/[^\w\s']/g, '') 
         .split(/\s+/)
         .filter(word => !stopWords.has(word) && word.length > 2);
         
-    return [...new Set(keywords)].join(' '); // Return unique keywords as a string
+    return [...new Set(keywords)].join(' ');
 }
 
-// Scraper function
-async function scrapeProductData(query) {
-    // It's crucial to use your actual search URL structure.
-    // Based on the HTML you provided, your site uses `?s=<query>&post_type=product` for product searches.
-    const searchUrl = `https://attradeprice.co.uk/?s=${encodeURIComponent(query)}&post_type=product`;
-    console.log(`--- SCRAPER: Attempting to fetch URL: ${searchUrl} ---`);
+// *** NEW FUNCTION: Fetch product data directly from WordPress REST API ***
+async function fetchProductsFromWordPressAPI(query) {
+    // Your WordPress site's base URL and the new custom endpoint
+    const apiUrl = `https://attradeprice.co.uk/wp-json/atp/v1/search-products?q=${encodeURIComponent(query)}`;
+    console.log(`--- WP API FETCH: Attempting to fetch URL: ${apiUrl} ---`);
 
     try {
-        const response = await fetch(searchUrl);
-        const html = await response.text();
-
-        console.log(`--- SCRAPER: Raw HTML Received (first 1000 chars): ${html.substring(0, 1000)}... ---`);
-        console.log(`--- SCRAPER: Full HTML length: ${html.length} ---`);
-
-        const $ = cheerio.load(html);
-        const products = [];
-
-        // *** RE-REFINED WOODMART SELECTORS based on your provided HTML ***
-        // The core product wrapper seems to be `.wd-product` on search/shop pages.
-        // Within that, title is in `.wd-entities-title a` and description (if present in search results)
-        // is in `.hover-content-inner.wd-more-desc-inner`.
-        const productElements = $('.wd-product'); 
-
-        if (productElements.length === 0) {
-            console.log("--- SCRAPER: No '.wd-product' elements found. This means the main product containers were not identified. ---");
-            // Log more of the body to diagnose if the HTML is even correct for searching products
-            console.log(`--- SCRAPER: Body content snippet (no products found): ${$('body').html().substring(0, 2000)}... ---`);
-        } else {
-            console.log(`--- SCRAPER: Found ${productElements.length} product elements. ---`);
+        const response = await fetch(apiUrl);
+        if (!response.ok) {
+            const errorBody = await response.text();
+            throw new Error(`WordPress API returned status ${response.status}: ${errorBody}`);
         }
-
-        productElements.each((i, el) => {
-            const $el = $(el);
-            const titleElement = $el.find('.wd-entities-title a');
-            const title = titleElement.text().trim();
-            const link = titleElement.attr('href');
-            
-            // For description, first check the specific 'hover-content-inner' used for excerpts.
-            // If that's empty, try a more general description class if applicable on product listing.
-            let description = $el.find('.hover-content-inner.wd-more-desc-inner').text().trim();
-            
-            // If still no description from common excerpt classes, try a generic paragraph that's not price
-            if (!description) {
-                const potentialDescription = $el.find('p:not(.price)'); // Select any paragraph not marked as price
-                if (potentialDescription.length > 0) {
-                    description = potentialDescription.first().text().trim();
-                }
-            }
-
-
-            if (title && link) {
-                products.push({ title, link, description });
-            }
-        });
-        
-        console.log(`--- SCRAPER: Products found by scraper: ${JSON.stringify(products)} ---`);
+        const products = await response.json();
+        console.log(`--- WP API FETCH: Products received from WordPress API: ${JSON.stringify(products)} ---`);
         return products;
-
     } catch (error) {
-        console.error("--- SCRAPER ERROR: Failed to scrape product data:", error);
+        console.error("--- WP API FETCH ERROR: Failed to fetch products from WordPress API:", error);
         return [];
     }
 }
@@ -100,25 +55,26 @@ export default async function handler(req, res) {
 
     const genAI = new GoogleGenerativeAI(apiKey);
     
-    // Extract keywords for the scraper
     const keywords = extractKeywords(jobDescription);
-    // Broaden search terms for scraping to improve initial product discovery
-    const searchTermsForScraper = `${keywords} natural stone paving OR pointing compound OR mot type 1 OR sand OR cement OR weed membrane OR patio OR gravel OR slate`; 
+    // Use keywords for searching your WordPress API
+    const searchTermsForAPI = `${keywords} natural stone paving OR pointing compound OR mot type 1 OR sand OR cement OR weed membrane OR patio OR gravel OR slate`; 
     
-    // Perform the scraping directly from the backend
-    const scrapedProducts = await scrapeProductData(searchTermsForScraper);
+    // *** CRITICAL CHANGE: Call the new WordPress API function ***
+    const fetchedProducts = await fetchProductsFromWordPressAPI(searchTermsForAPI);
 
-    // Prepare products for the AI
-    const productCatalogForAI = scrapedProducts.map(p => ({
+    // Prepare products for the AI - including full product objects
+    // The AI can now use the 'description' field from WordPress
+    const productCatalogForAI = fetchedProducts.map(p => ({
+        id: p.id, // Pass the WordPress product ID or SKU
         title: p.title,
-        description: p.description, // Include the scraped description
-        link: p.link
+        description: p.description, 
+        link: p.link,
+        image: p.image // Pass the image URL if available
     }));
 
     console.log(`--- AI INPUT: Product catalog for AI: ${JSON.stringify(productCatalogForAI)} ---`);
 
-    // *** CRITICAL CHANGE: Remove the 'tools' property from getGenerativeModel ***
-    // This bypasses the fluctuating Google Search tool name issue.
+    // Removed the 'tools' property entirely - this should fix the AI error.
     const model = genAI.getGenerativeModel({ 
         model: "gemini-1.5-flash"
     });
@@ -130,13 +86,13 @@ export default async function handler(req, res) {
       **Customer Job Description:**
       "${jobDescription}"
 
-      **Product Catalog from AtTradePrice.co.uk (You MUST ONLY use products from this list if relevant, otherwise mark as 'to be quoted'. Do NOT use your general knowledge to suggest other products not in this list):**
+      **Product Catalog from AtTradePrice.co.uk (You MUST ONLY use products from this list if relevant, otherwise mark as 'to be quoted'. Do NOT use your general knowledge to suggest other products not in this list. For options, use the exact 'title' for both 'id' and 'name'):**
       ${JSON.stringify(productCatalogForAI)}
 
       **Instructions & Rules:**
       1.  Analyze the 'Customer Job Description' to determine all necessary materials and their quantities. Assume a 10% waste factor for materials like paving, aggregates, and membranes.
       2.  For each material needed, try to find a direct match or highly relevant product from the 'Product Catalog'. Use the 'description' field from the catalog if available to better understand the product.
-      3.  **Crucially:** If you find multiple suitable products for a single material requirement from the 'Product Catalog' (e.g., "Kandla Grey Natural Stone Paving" and "Brazilian Slate Paving" for a "Natural Stone Paving" need), you MUST include them as an array of 'options'. Each option must have an 'id' (which is the exact 'title' from the catalog) and a 'name' (which is the exact 'title' from the catalog). Do NOT invent product names. Use the exact titles from the provided catalog.
+      3.  **Crucially:** If you find multiple suitable products for a single material requirement from the 'Product Catalog' (e.g., "Kandla Grey Natural Stone Paving" and "Brazilian Slate Paving" for a "Natural Stone Paving" need), you MUST include them as an array of 'options'. Each option MUST have an 'id' (which is the exact 'title' from the catalog) and a 'name' (which is the exact 'title' from the catalog). Do NOT invent product names. Use the exact titles from the provided catalog.
       4.  If a material is needed for the job (e.g., "MOT Type 1 Sub-base", "Cement", "Sand") but you **cannot** find any specific, relevant product for it in the 'Product Catalog', you MUST still include it in the material list as a single item (not with options). For these items, set the 'id' to a generic, descriptive string like "generic-mot1" or "generic-cement", and set the 'name' to describe the material followed by "(to be quoted)".
       5.  Quantities should be sensible (e.g., "m²" for paving, "m³" for aggregates, "bags" or "tubs" for cement/pointing compound).
       6.  Generate a JSON object with the following exact structure. Note the 'options' field which should be an array of matching products (using their exact 'title' for both 'id' and 'name') if multiple products are found, otherwise it should be null.
