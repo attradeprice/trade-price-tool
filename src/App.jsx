@@ -1,20 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Zap, FileText, UserCheck, Edit } from 'lucide-react';
-
-// Mock Product Database (now without prices)
-// This will be sent to the AI along with the user's prompt.
-const MOCK_PRODUCTS = [
-  { id: 1, name: 'Kandla Grey Natural Sandstone Paving Slabs', category: 'Paving', type: 'Natural Stone', coverage_per_unit: 0.9, unit: 'm²' },
-  { id: 2, name: 'Raj Green Natural Sandstone Paving Slabs', category: 'Paving', type: 'Natural Stone', coverage_per_unit: 0.9, unit: 'm²' },
-  { id: 3, name: 'Black Limestone Paving Slabs', category: 'Paving', type: 'Limestone', coverage_per_unit: 0.9, unit: 'm²' },
-  { id: 4, name: 'Porcelain Paving Slabs - Anthracite', category: 'Paving', type: 'Porcelain', coverage_per_unit: 1, unit: 'm²' },
-  { id: 5, name: 'MOT Type 1 Sub-base', category: 'Aggregate', type: 'Sub-base', coverage_per_unit: 0.02, unit: 'tonne' },
-  { id: 6, name: 'Building Sand', category: 'Aggregate', type: 'Sand', coverage_per_unit: 0.025, unit: 'tonne' },
-  { id: 7, name: 'Cement', category: 'Aggregate', type: 'Cement', coverage_per_unit: 0.025, unit: 'bag' },
-  { id: 8, name: 'vdw 850 Grouting Compound - Basalt', category: 'Pointing', type: 'Compound', coverage_per_unit: 15, unit: 'tub' },
-  { id: 9, name: 'vdw 815 Grouting Compound - Natural', category: 'Pointing', type: 'Compound', coverage_per_unit: 15, unit: 'tub' },
-  { id: 10, name: 'Geotextile Membrane', category: 'Landscaping Fabric', type: 'Membrane', coverage_per_unit: 1, unit: 'm²'},
-];
+import { Zap, FileText, UserCheck, Edit, Settings, Upload, Building, User } from 'lucide-react';
 
 // --- Helper Components ---
 
@@ -31,29 +16,103 @@ const Button = ({ onClick, children, className = '', disabled = false }) => (
     className={`w-full flex items-center justify-center gap-2 rounded-lg px-6 py-3 text-base font-semibold text-white transition-all duration-300 ease-in-out ${
       disabled
         ? 'bg-gray-400 cursor-not-allowed'
-        : 'bg-blue-600 hover:bg-blue-700 shadow-md hover:shadow-lg transform hover:-translate-y-0.5'
+        : 'bg-brand hover:bg-brand-hover shadow-md hover:shadow-lg transform hover:-translate-y-0.5'
     } ${className}`}
   >
     {children}
   </button>
 );
 
+const Input = ({ label, value, onChange, placeholder, name }) => (
+    <div>
+        <label htmlFor={name} className="block text-sm font-medium text-gray-700">{label}</label>
+        <input
+            type="text"
+            name={name}
+            id={name}
+            value={value}
+            onChange={onChange}
+            placeholder={placeholder}
+            className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-brand focus:border-brand sm:text-sm"
+        />
+    </div>
+);
+
+
 // --- Core Components ---
 
 const JobInput = ({ jobDescription, setJobDescription }) => (
   <Card>
-    <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mb-4">Describe Your Project</h2>
+    <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mb-4">1. Describe Your Project</h2>
     <p className="text-gray-600 mb-4">
       Provide as much detail as possible. For example: "I want to build a patio on a grass area, 5x4 metres, using natural stone."
     </p>
     <textarea
       value={jobDescription}
       onChange={(e) => setJobDescription(e.target.value)}
-      className="w-full h-40 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow duration-200"
+      className="w-full h-40 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand focus:border-brand transition-shadow duration-200"
       placeholder="Enter job description here..."
     />
   </Card>
 );
+
+const QuoteDetailsForm = ({ companyDetails, setCompanyDetails, customerDetails, setCustomerDetails, vatRate, setVatRate, logo, setLogo }) => {
+    const handleCompanyChange = (e) => {
+        setCompanyDetails({ ...companyDetails, [e.target.name]: e.target.value });
+    };
+
+    const handleCustomerChange = (e) => {
+        setCustomerDetails({ ...customerDetails, [e.target.name]: e.target.value });
+    };
+
+    const handleLogoChange = (e) => {
+        if (e.target.files && e.target.files[0]) {
+            setLogo(URL.createObjectURL(e.target.files[0]));
+        }
+    };
+
+    return (
+        <Card>
+            <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mb-6">2. Customize Your Quote</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* Your Company Details */}
+                <div className="space-y-4">
+                    <h3 className="text-lg font-semibold text-gray-700 flex items-center gap-2"><Building size={20} /> Your Details</h3>
+                    <Input label="Your Company Name" name="name" value={companyDetails.name} onChange={handleCompanyChange} placeholder="e.g., Your Trade Co." />
+                    <Input label="Your Address" name="address" value={companyDetails.address} onChange={handleCompanyChange} placeholder="e.g., 123 Main Street, London" />
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">Your Logo</label>
+                        <div className="mt-1 flex items-center gap-4">
+                            <span className="inline-block h-12 w-12 rounded-full overflow-hidden bg-gray-100">
+                                {logo ? <img src={logo} alt="Company Logo" className="h-full w-full object-cover" /> : <Upload className="h-full w-full text-gray-300 p-3" />}
+                            </span>
+                            <input type="file" onChange={handleLogoChange} accept="image/*" className="text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-brand/10 file:text-brand hover:file:bg-brand/20"/>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Customer Details */}
+                <div className="space-y-4">
+                    <h3 className="text-lg font-semibold text-gray-700 flex items-center gap-2"><User size={20} /> Customer's Details</h3>
+                    <Input label="Customer Name" name="name" value={customerDetails.name} onChange={handleCustomerChange} placeholder="e.g., John Doe" />
+                    <Input label="Customer Address" name="address" value={customerDetails.address} onChange={handleCustomerChange} placeholder="e.g., 456 Client Avenue, Bristol" />
+                     <div>
+                        <label htmlFor="vatRate" className="block text-sm font-medium text-gray-700">VAT Rate (%)</label>
+                        <input
+                            type="number"
+                            name="vatRate"
+                            id="vatRate"
+                            value={vatRate}
+                            onChange={(e) => setVatRate(e.target.value)}
+                            className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-brand focus:border-brand sm:text-sm"
+                        />
+                    </div>
+                </div>
+            </div>
+        </Card>
+    );
+};
+
 
 const TierSelector = ({ selectedTier, setSelectedTier }) => {
   const tiers = [
@@ -64,16 +123,16 @@ const TierSelector = ({ selectedTier, setSelectedTier }) => {
 
   return (
     <Card>
-      <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mb-4">Select Your Service Tier</h2>
+      <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mb-4">3. Select Your Service Tier</h2>
       <div className="space-y-4">
         {tiers.map(tier => (
           <div
             key={tier.id}
             onClick={() => setSelectedTier(tier.id)}
-            className={`p-4 border rounded-lg cursor-pointer transition-all duration-200 ${selectedTier === tier.id ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-500' : 'border-gray-300 hover:border-blue-400 hover:bg-gray-50'}`}
+            className={`p-4 border rounded-lg cursor-pointer transition-all duration-200 ${selectedTier === tier.id ? 'border-brand bg-teal-50 ring-2 ring-brand' : 'border-gray-300 hover:border-brand/50 hover:bg-gray-50'}`}
           >
             <div className="flex items-center gap-4">
-              <div className={`p-2 rounded-full ${selectedTier === tier.id ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-600'}`}>
+              <div className={`p-2 rounded-full ${selectedTier === tier.id ? 'bg-brand text-white' : 'bg-gray-200 text-gray-600'}`}>
                 {tier.icon}
               </div>
               <div>
@@ -88,10 +147,9 @@ const TierSelector = ({ selectedTier, setSelectedTier }) => {
   );
 };
 
-const QuoteOutput = ({ quote, tier, materialPrices, setMaterialPrices }) => {
-  // Hooks are now called at the top level, unconditionally.
+const QuoteOutput = ({ quote, tier, materialPrices, setMaterialPrices, companyDetails, customerDetails, vatRate, logo }) => {
   const totalCost = useMemo(() => {
-    if (!quote) return 0; // Guard clause inside the hook
+    if (!quote) return 0;
     return quote.materials.reduce((acc, item) => {
       const price = parseFloat(materialPrices[item.id]) || 0;
       return acc + (price * item.quantity);
@@ -99,9 +157,9 @@ const QuoteOutput = ({ quote, tier, materialPrices, setMaterialPrices }) => {
   }, [quote, materialPrices]);
 
   const updatedCustomerQuote = useMemo(() => {
-    if (!quote || !quote.customerQuote) return null; // Guard clause inside the hook
+    if (!quote || !quote.customerQuote) return null;
     const subTotal = totalCost + quote.customerQuote.labourCost;
-    const vat = subTotal * 0.20;
+    const vat = subTotal * (parseFloat(vatRate) / 100);
     const total = subTotal + vat;
     return {
       ...quote.customerQuote,
@@ -109,9 +167,8 @@ const QuoteOutput = ({ quote, tier, materialPrices, setMaterialPrices }) => {
       vat,
       total
     };
-  }, [quote, totalCost]);
+  }, [quote, totalCost, vatRate]);
 
-  // The conditional return is now at the end, after all hooks have been called.
   if (!quote) {
     return null;
   }
@@ -128,8 +185,6 @@ const QuoteOutput = ({ quote, tier, materialPrices, setMaterialPrices }) => {
   return (
     <Card className="mt-8">
       <h2 className="text-2xl sm:text-3xl font-bold text-gray-800 mb-6 border-b pb-4">Your Generated Plan</h2>
-
-      {/* Tier 1: Materials List */}
       <div className="mb-8">
         <h3 className="text-xl font-semibold text-gray-700 mb-4">Tier 1: Material List</h3>
          <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg mb-4 text-sm text-yellow-800 flex items-center gap-2">
@@ -169,18 +224,16 @@ const QuoteOutput = ({ quote, tier, materialPrices, setMaterialPrices }) => {
             <tfoot>
               <tr className="font-bold text-lg">
                 <td colSpan="3" className="p-3 text-right text-gray-800">Grand Total (Materials)</td>
-                <td className="p-3 text-right text-blue-600">£{totalCost.toFixed(2)}</td>
+                <td className="p-3 text-right text-brand">£{totalCost.toFixed(2)}</td>
               </tr>
             </tfoot>
           </table>
         </div>
       </div>
-
-      {/* Tier 2: Method */}
       {tier >= 2 && method && (
         <div className="mb-8">
           <h3 className="text-xl font-semibold text-gray-700 mb-4">Tier 2: Construction Method</h3>
-          <div className="prose prose-blue max-w-none">
+          <div className="prose prose-teal max-w-none">
             <ol>
               {method.steps.map((step, index) => (
                 <li key={index}>{step}</li>
@@ -197,29 +250,25 @@ const QuoteOutput = ({ quote, tier, materialPrices, setMaterialPrices }) => {
           </div>
         </div>
       )}
-
-      {/* Tier 3: Customer Quote */}
       {tier >= 3 && updatedCustomerQuote && (
         <div>
           <h3 className="text-xl font-semibold text-gray-700 mb-4">Tier 3: Customer-Ready Quote</h3>
           <div className="border rounded-lg p-6 bg-gray-50">
-            <h4 className="text-2xl font-bold text-center mb-2">Your Company Name</h4>
-            <p className="text-center text-gray-500 mb-6">123 Trade Street, Buildtown, UK</p>
-
+             <img src={logo || "https://attradeprice.co.uk/wp-content/uploads/2023/04/logo-dark.png"} alt="Company Logo" className="h-16 mx-auto mb-4" />
+            <h4 className="text-2xl font-bold text-center mb-2">{companyDetails.name || "Your Company Name"}</h4>
+            <p className="text-center text-gray-500 mb-6">{companyDetails.address || "123 Trade Street, Buildtown, UK"}</p>
             <div className="flex justify-between mb-4">
                 <div>
                     <p className="font-bold">Quote For:</p>
-                    <p>[Client Name]</p>
-                    <p>[Client Address]</p>
+                    <p>{customerDetails.name || "[Client Name]"}</p>
+                    <p>{customerDetails.address || "[Client Address]"}</p>
                 </div>
                 <div>
                     <p><strong>Quote #:</strong> {updatedCustomerQuote.quoteNumber}</p>
                     <p><strong>Date:</strong> {updatedCustomerQuote.date}</p>
                 </div>
             </div>
-
             <p className="mb-4"><strong>Project:</strong> {updatedCustomerQuote.projectDescription}</p>
-
             <table className="w-full text-left mb-4">
               <thead>
                 <tr className="bg-gray-200 text-sm font-semibold text-gray-600">
@@ -238,10 +287,9 @@ const QuoteOutput = ({ quote, tier, materialPrices, setMaterialPrices }) => {
                 </tr>
               </tbody>
             </table>
-
             <div className="text-right">
               <p className="text-gray-600">Subtotal: £{(updatedCustomerQuote.materialsCost + updatedCustomerQuote.labourCost).toFixed(2)}</p>
-              <p className="text-gray-600">VAT (20%): £{updatedCustomerQuote.vat.toFixed(2)}</p>
+              <p className="text-gray-600">VAT ({vatRate}%): £{updatedCustomerQuote.vat.toFixed(2)}</p>
               <p className="text-2xl font-bold text-gray-800 mt-2">Total: £{updatedCustomerQuote.total.toFixed(2)}</p>
             </div>
             <p className="text-xs text-gray-500 mt-6">This quote is valid for 30 days. Labour cost is an estimate. Material cost is based on prices entered by the user. Terms and conditions apply.</p>
@@ -252,7 +300,6 @@ const QuoteOutput = ({ quote, tier, materialPrices, setMaterialPrices }) => {
   );
 };
 
-
 // --- Main App Component ---
 export default function App() {
   const [jobDescription, setJobDescription] = useState('I want to build a patio which is on a grass area currently and it will be 5x4 metres in size and I want it out of natural stone.');
@@ -261,16 +308,17 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [materialPrices, setMaterialPrices] = useState({});
+  const [companyDetails, setCompanyDetails] = useState({ name: '', address: '' });
+  const [customerDetails, setCustomerDetails] = useState({ name: '', address: '' });
+  const [vatRate, setVatRate] = useState(20);
+  const [logo, setLogo] = useState(null);
 
-  // This function now calls a backend API endpoint
   const generateQuote = async () => {
     setIsLoading(true);
     setError(null);
     setQuote(null);
     setMaterialPrices({});
 
-    // The Vite development server automatically proxies requests starting with /api
-    // to your backend functions, so we can use a relative path.
     const API_ENDPOINT = '/api/generate-quote';
 
     try {
@@ -281,22 +329,19 @@ export default function App() {
         },
         body: JSON.stringify({
           jobDescription: jobDescription,
-          products: MOCK_PRODUCTS,
         }),
       });
 
       if (!response.ok) {
-        // Try to get a more detailed error message from the backend
         const errorData = await response.json();
         throw new Error(errorData.error || `API call failed with status: ${response.status}`);
       }
 
       const parsedResponse = await response.json();
 
-      // Now, we use the AI's response to build the quote object
       const areaMatch = jobDescription.toLowerCase().match(/(\d+)\s*x\s*(\d+)/);
       const area = areaMatch ? parseInt(areaMatch[1]) * parseInt(areaMatch[2]) : 20;
-      const labourCost = area * 80; // Example labour cost
+      const labourCost = area * 80;
 
       const customerQuote = {
           quoteNumber: `Q-${Math.floor(1000 + Math.random() * 9000)}`,
@@ -309,8 +354,8 @@ export default function App() {
       };
 
       setQuote({
-          materials: parsedResponse.materials, // Use materials from AI
-          method: parsedResponse.method, // Use method from AI
+          materials: parsedResponse.materials,
+          method: parsedResponse.method,
           customerQuote: customerQuote,
       });
 
@@ -328,6 +373,7 @@ export default function App() {
     <div className="bg-gray-100 min-h-screen font-sans">
       <div className="container mx-auto p-4 sm:p-6 lg:p-8">
         <header className="text-center mb-8">
+          <img src="https://attradeprice.co.uk/wp-content/uploads/2023/04/logo-dark.png" alt="At Trade Price Logo" className="h-16 mx-auto mb-4" />
           <h1 className="text-4xl sm:text-5xl font-extrabold text-gray-800">
             AI Material & Quote Generator
           </h1>
@@ -339,6 +385,16 @@ export default function App() {
         <main className="max-w-4xl mx-auto">
           <div className="space-y-8">
             <JobInput jobDescription={jobDescription} setJobDescription={setJobDescription} />
+            <QuoteDetailsForm 
+                companyDetails={companyDetails}
+                setCompanyDetails={setCompanyDetails}
+                customerDetails={customerDetails}
+                setCustomerDetails={setCustomerDetails}
+                vatRate={vatRate}
+                setVatRate={setVatRate}
+                logo={logo}
+                setLogo={setLogo}
+            />
             <TierSelector selectedTier={selectedTier} setSelectedTier={setSelectedTier} />
 
             <div className="text-center pt-4">
@@ -362,11 +418,11 @@ export default function App() {
             </div>
           </div>
           {error && <div className="mt-8 p-4 bg-red-100 border border-red-300 text-red-800 rounded-lg">{error}</div>}
-          {quote && <QuoteOutput quote={quote} tier={selectedTier} materialPrices={materialPrices} setMaterialPrices={setMaterialPrices} />}
+          {quote && <QuoteOutput quote={quote} tier={selectedTier} materialPrices={materialPrices} setMaterialPrices={setMaterialPrices} companyDetails={companyDetails} customerDetails={customerDetails} vatRate={vatRate} logo={logo} />}
         </main>
 
         <footer className="text-center mt-12 text-gray-500 text-sm">
-          <p>&copy; {new Date().getFullYear()} At Trade Price Plugin. All rights reserved.</p>
+          <p>&copy; {new Date().getFullYear()} At Trade Price. All rights reserved.</p>
         </footer>
       </div>
     </div>
