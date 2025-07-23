@@ -15,12 +15,16 @@ function extractKeywords(description) {
 
 // Function to fetch product data directly from WordPress REST API
 async function fetchProductsFromWordPressAPI(query) {
-    // Your WordPress site's base URL and the custom endpoint
     const apiUrl = `https://attradeprice.co.uk/wp-json/atp/v1/search-products?q=${encodeURIComponent(query)}`;
     console.log(`--- WP API FETCH: Attempting to fetch URL: ${apiUrl} ---`);
 
     try {
-        const response = await fetch(apiUrl);
+        const response = await fetch(apiUrl, {
+            // *** CRITICAL ADDITION: Emulate a browser User-Agent ***
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Safari/537.36'
+            }
+        });
         if (!response.ok) {
             const errorBody = await response.text();
             throw new Error(`WordPress API returned status ${response.status}: ${errorBody}`);
@@ -56,15 +60,12 @@ export default async function handler(req, res) {
     const genAI = new GoogleGenerativeAI(apiKey);
     
     const keywords = extractKeywords(jobDescription);
-    // Use broad, but targeted terms for the API search query to increase chances of finding relevant products.
     const searchTermsForAPI = `${keywords} natural stone paving OR pointing compound OR mot type 1 OR sand OR cement OR weed membrane OR patio OR gravel OR slate`; 
     
-    // Call the WordPress API function
     const fetchedProducts = await fetchProductsFromWordPressAPI(searchTermsForAPI);
 
-    // Prepare products for the AI - including full product objects
     const productCatalogForAI = fetchedProducts.map(p => ({
-        id: p.id, // Pass the WordPress product ID
+        id: p.id, 
         title: p.title,
         description: p.description, 
         link: p.link,
@@ -73,7 +74,6 @@ export default async function handler(req, res) {
 
     console.log(`--- AI INPUT: Product catalog for AI: ${JSON.stringify(productCatalogForAI)} ---`);
 
-    // Removed the 'tools' property entirely - this should fix the AI error.
     const model = genAI.getGenerativeModel({ 
         model: "gemini-1.5-flash"
     });
