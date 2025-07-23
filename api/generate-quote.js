@@ -1,103 +1,91 @@
-// This is a serverless function for Vercel or Netlify.
-// It acts as a secure backend to call the Google AI API.
-
-// We need to install the Google Generative AI SDK
-// Run this command in your terminal: npm install @google/generative-ai
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// This is the main function that will be executed when the API endpoint is called.
+// Helper function to extract keywords from a job description
+function extractKeywords(description) {
+    const lowerDesc = description.toLowerCase();
+    const stopWords = new Set(['a', 'an', 'the', 'in', 'on', 'for', 'with', 'i', 'want', 'to', 'build', 'and', 'is', 'it', 'will', 'be', 'area', 'size', 'using', 'out', 'of']);
+    
+    const keywords = lowerDesc
+        .replace(/[^\w\s]/g, '') // remove punctuation
+        .split(/\s+/)
+        .filter(word => !stopWords.has(word) && word.length > 2);
+        
+    return [...new Set(keywords)].join(' '); // Return unique keywords as a string
+}
+
+
 export default async function handler(req, res) {
-  // 1. Check for the correct request method (we only accept POST)
   if (req.method !== 'POST') {
     res.setHeader('Allow', ['POST']);
     return res.status(405).end(`Method ${req.method} Not Allowed`);
   }
 
   try {
-    // 2. Get the job description and product list from the request body
-    const { jobDescription, products } = req.body;
+    const { jobDescription } = req.body;
 
-    if (!jobDescription || !products) {
-      return res.status(400).json({ error: 'Missing jobDescription or products in request body' });
+    if (!jobDescription) {
+      return res.status(400).json({ error: 'Missing jobDescription in request body' });
     }
 
-    // 3. Securely get the API key from environment variables
-    //    For local development, create a .env.local file. For Vercel, use the dashboard.
     const apiKey = process.env.VITE_GOOGLE_API_KEY;
     if (!apiKey) {
-      throw new Error("API key not found. Please set the VITE_GOOGLE_API_KEY environment variable.");
+      throw new Error("API key not found.");
     }
 
-    // 4. Initialize the Google Generative AI client
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    
+    // --- New Web Search Logic ---
+    const keywords = extractKeywords(jobDescription);
+    const searchQuery = `site:attradeprice.co.uk ${keywords}`;
+    
+    // Use the Gemini model with the search tool
+    const model = genAI.getGenerativeModel({ 
+        model: "gemini-1.5-flash",
+        tools: [{ "google_search": { "query": searchQuery } }]
+    });
 
-    // 5. Construct the detailed prompt for the AI
-    //    This is the most important part - we are "prompt engineering" here.
     const prompt = `
-      You are an expert quantity surveyor for a UK-based building materials supplier.
-      Your task is to analyze a customer's job description and a list of available products to create a detailed material list and a step-by-step construction method.
+      You are an expert quantity surveyor for a UK-based building materials supplier called "At Trade Price".
+      Your task is to analyze a customer's job description and the provided Google Search results from the attradeprice.co.uk website to create a material list and construction method.
 
       **Customer Job Description:**
       "${jobDescription}"
 
-      **Available Products (JSON format):**
-      ${JSON.stringify(products, null, 2)}
-
-      **Your Task:**
-      Based on the job description and the available products, generate a JSON object with the following exact structure:
-      {
-        "materials": [
-          { "id": <product_id>, "name": "<product_name>", "quantity": <calculated_quantity>, "unit": "<product_unit>" },
-          ...
-        ],
-        "method": {
-          "steps": ["<step_1>", "<step_2>", ...],
-          "considerations": ["<consideration_1>", "<consideration_2>", ...]
-        }
-      }
-
-      **CRITICAL INSTRUCTION:** Your entire response MUST be only the raw JSON object. Do not include any extra text, explanations, apologies, or markdown formatting like \`\`\`json before or after the JSON object. The response must start with { and end with }.
+      **Instructions & Rules:**
+      1.  Analyze the provided search results from the \`google_search\` tool. These are the products available on the website.
+      2.  Based on the job description, calculate the required quantity for each necessary material. Assume a 10% waste factor for materials like paving and aggregates.
+      3.  **Crucially:** If you identify a material needed for the job (e.g., "MOT Type 1 Sub-base", "Cement") but you **cannot** find a specific product for it in the search results, you MUST still include it in the material list. For these items, set the 'name' to describe the material and add "(to be quoted)" at the end. Set the 'id' to a generic, descriptive string like "generic-mot1" or "generic-cement".
+      4.  Generate a JSON object with the following exact structure:
+          {
+            "materials": [
+              { "id": "<product_sku_or_generic-id>", "name": "<Product Name or Generic Name (to be quoted)>", "quantity": <calculated_quantity>, "unit": "<product_unit>" },
+              ...
+            ],
+            "method": {
+              "steps": ["<step_1>", "<step_2>", ...],
+              "considerations": ["<consideration_1>", "<consideration_2>", ...]
+            }
+          }
+      5.  Your entire response MUST be only the raw JSON object. Do not include any extra text, explanations, or markdown formatting. The response must start with { and end with }.
     `;
 
-    // 6. Call the AI model
     const result = await model.generateContent(prompt);
     const response = await result.response;
     let aiResponseText = response.text();
 
-    // --- NEW DEBUG LOGS ---
-    console.log("--- RAW AI RESPONSE ---");
-    console.log(aiResponseText);
-    console.log("--- END RAW AI RESPONSE ---");
-
-    // 7. Clean up the AI's response to ensure it's valid JSON.
-    //    This finds the first '{' and the last '}' to extract the JSON block.
     const jsonStart = aiResponseText.indexOf('{');
     const jsonEnd = aiResponseText.lastIndexOf('}');
-    
     if (jsonStart === -1 || jsonEnd === -1) {
-      console.error("AI response did not contain '{' or '}'.");
       throw new Error("AI did not return a valid JSON object.");
     }
+    aiResponseText = aiResponseText.substring(jsonStart, jsonEnd + 1);
 
-    let jsonString = aiResponseText.substring(jsonStart, jsonEnd + 1);
-    
-    console.log("--- EXTRACTED JSON STRING ---");
-    console.log(jsonString);
-    console.log("--- END EXTRACTED JSON STRING ---");
+    const parsedJsonResponse = JSON.parse(aiResponseText);
 
-    // 8. The AI returns a JSON string, so we need to parse it before sending it back.
-    const parsedJsonResponse = JSON.parse(jsonString);
-
-    console.log("--- SUCCESSFULLY PARSED JSON ---");
-
-    // 9. Send the successful response back to the front-end
     res.status(200).json(parsedJsonResponse);
 
   } catch (error) {
-    // 10. Handle any errors that occur during the process
-    console.error("--- ERROR IN SERVERLESS FUNCTION ---");
-    console.error(error);
+    console.error("Error in serverless function:", error);
     res.status(500).json({ error: "An internal server error occurred.", details: error.message });
   }
 }
