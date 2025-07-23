@@ -13,9 +13,9 @@ function extractKeywords(description) {
     return [...new Set(keywords)].join(' ');
 }
 
-// *** NEW FUNCTION: Fetch product data directly from WordPress REST API ***
+// Function to fetch product data directly from WordPress REST API
 async function fetchProductsFromWordPressAPI(query) {
-    // Your WordPress site's base URL and the new custom endpoint
+    // Your WordPress site's base URL and the custom endpoint
     const apiUrl = `https://attradeprice.co.uk/wp-json/atp/v1/search-products?q=${encodeURIComponent(query)}`;
     console.log(`--- WP API FETCH: Attempting to fetch URL: ${apiUrl} ---`);
 
@@ -56,20 +56,19 @@ export default async function handler(req, res) {
     const genAI = new GoogleGenerativeAI(apiKey);
     
     const keywords = extractKeywords(jobDescription);
-    // Use keywords for searching your WordPress API
+    // Use broad, but targeted terms for the API search query to increase chances of finding relevant products.
     const searchTermsForAPI = `${keywords} natural stone paving OR pointing compound OR mot type 1 OR sand OR cement OR weed membrane OR patio OR gravel OR slate`; 
     
-    // *** CRITICAL CHANGE: Call the new WordPress API function ***
+    // Call the WordPress API function
     const fetchedProducts = await fetchProductsFromWordPressAPI(searchTermsForAPI);
 
     // Prepare products for the AI - including full product objects
-    // The AI can now use the 'description' field from WordPress
     const productCatalogForAI = fetchedProducts.map(p => ({
-        id: p.id, // Pass the WordPress product ID or SKU
+        id: p.id, // Pass the WordPress product ID
         title: p.title,
         description: p.description, 
         link: p.link,
-        image: p.image // Pass the image URL if available
+        image: p.image 
     }));
 
     console.log(`--- AI INPUT: Product catalog for AI: ${JSON.stringify(productCatalogForAI)} ---`);
