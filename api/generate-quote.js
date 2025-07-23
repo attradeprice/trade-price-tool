@@ -17,6 +17,8 @@ function extractKeywords(description) {
 
 // Scraper function
 async function scrapeProductData(query) {
+    // It's crucial to use your actual search URL structure.
+    // Based on the HTML you provided, your site uses `?s=<query>&post_type=product` for product searches.
     const searchUrl = `https://attradeprice.co.uk/?s=${encodeURIComponent(query)}&post_type=product`;
     console.log(`--- SCRAPER: Attempting to fetch URL: ${searchUrl} ---`);
 
@@ -30,25 +32,38 @@ async function scrapeProductData(query) {
         const $ = cheerio.load(html);
         const products = [];
 
-        // *** DEFINITIVE WOODMART SELECTORS ***
-        // Target the main product wrapper specifically, which contains the title, link, and description.
+        // *** RE-REFINED WOODMART SELECTORS based on your provided HTML ***
+        // The core product wrapper seems to be `.wd-product` on search/shop pages.
+        // Within that, title is in `.wd-entities-title a` and description (if present in search results)
+        // is in `.hover-content-inner.wd-more-desc-inner`.
         const productElements = $('.wd-product'); 
 
         if (productElements.length === 0) {
             console.log("--- SCRAPER: No '.wd-product' elements found. This means the main product containers were not identified. ---");
-            // Also log a snippet of the body content if no products found, to ensure HTML is being loaded
-            console.log(`--- SCRAPER: Body content snippet (no products found): ${$('body').html().substring(0, 500)}... ---`);
+            // Log more of the body to diagnose if the HTML is even correct for searching products
+            console.log(`--- SCRAPER: Body content snippet (no products found): ${$('body').html().substring(0, 2000)}... ---`);
+        } else {
+            console.log(`--- SCRAPER: Found ${productElements.length} product elements. ---`);
         }
 
         productElements.each((i, el) => {
             const $el = $(el);
-            // Within .wd-product, find the title link (usually inside h3.wd-entities-title)
             const titleElement = $el.find('.wd-entities-title a');
             const title = titleElement.text().trim();
             const link = titleElement.attr('href');
             
-            // Find the short description. Based on your HTML, it's often within '.hover-content-inner.wd-more-desc-inner'.
+            // For description, first check the specific 'hover-content-inner' used for excerpts.
+            // If that's empty, try a more general description class if applicable on product listing.
             let description = $el.find('.hover-content-inner.wd-more-desc-inner').text().trim();
+            
+            // If still no description from common excerpt classes, try a generic paragraph that's not price
+            if (!description) {
+                const potentialDescription = $el.find('p:not(.price)'); // Select any paragraph not marked as price
+                if (potentialDescription.length > 0) {
+                    description = potentialDescription.first().text().trim();
+                }
+            }
+
 
             if (title && link) {
                 products.push({ title, link, description });
@@ -85,12 +100,13 @@ export default async function handler(req, res) {
 
     const genAI = new GoogleGenerativeAI(apiKey);
     
-    // Extract keywords for a broad search initially, focusing on material types
+    // Extract keywords for the scraper
     const keywords = extractKeywords(jobDescription);
-    const primarySearchTerms = `${keywords} natural stone paving OR pointing compound OR mot type 1 OR sand OR cement OR weed membrane`; // Broad terms
+    // Broaden search terms for scraping to improve initial product discovery
+    const searchTermsForScraper = `${keywords} natural stone paving OR pointing compound OR mot type 1 OR sand OR cement OR weed membrane OR patio OR gravel OR slate`; 
     
     // Perform the scraping directly from the backend
-    const scrapedProducts = await scrapeProductData(primarySearchTerms);
+    const scrapedProducts = await scrapeProductData(searchTermsForScraper);
 
     // Prepare products for the AI
     const productCatalogForAI = scrapedProducts.map(p => ({
@@ -101,25 +117,25 @@ export default async function handler(req, res) {
 
     console.log(`--- AI INPUT: Product catalog for AI: ${JSON.stringify(productCatalogForAI)} ---`);
 
-    // The AI model with the search tool
+    // *** CRITICAL CHANGE: Remove the 'tools' property from getGenerativeModel ***
+    // This bypasses the fluctuating Google Search tool name issue.
     const model = genAI.getGenerativeModel({ 
-        model: "gemini-1.5-flash",
-        tools: [{ "Google Search_retrieval": {} }] 
+        model: "gemini-1.5-flash"
     });
 
     const prompt = `
       You are an expert quantity surveyor for a UK-based building materials supplier called "At Trade Price".
-      Your task is to analyze a customer's job description and suggest materials from the PROVIDED product catalog.
+      Your task is to analyze a customer's job description and suggest materials *strictly* from the PROVIDED product catalog.
 
       **Customer Job Description:**
       "${jobDescription}"
 
-      **Product Catalog from AtTradePrice.co.uk (ONLY use products from this list if relevant, otherwise mark as 'to be quoted'):**
+      **Product Catalog from AtTradePrice.co.uk (You MUST ONLY use products from this list if relevant, otherwise mark as 'to be quoted'. Do NOT use your general knowledge to suggest other products not in this list):**
       ${JSON.stringify(productCatalogForAI)}
 
       **Instructions & Rules:**
       1.  Analyze the 'Customer Job Description' to determine all necessary materials and their quantities. Assume a 10% waste factor for materials like paving, aggregates, and membranes.
-      2.  For each material needed, try to find a direct match or highly relevant product from the 'Product Catalog'.
+      2.  For each material needed, try to find a direct match or highly relevant product from the 'Product Catalog'. Use the 'description' field from the catalog if available to better understand the product.
       3.  **Crucially:** If you find multiple suitable products for a single material requirement from the 'Product Catalog' (e.g., "Kandla Grey Natural Stone Paving" and "Brazilian Slate Paving" for a "Natural Stone Paving" need), you MUST include them as an array of 'options'. Each option must have an 'id' (which is the exact 'title' from the catalog) and a 'name' (which is the exact 'title' from the catalog). Do NOT invent product names. Use the exact titles from the provided catalog.
       4.  If a material is needed for the job (e.g., "MOT Type 1 Sub-base", "Cement", "Sand") but you **cannot** find any specific, relevant product for it in the 'Product Catalog', you MUST still include it in the material list as a single item (not with options). For these items, set the 'id' to a generic, descriptive string like "generic-mot1" or "generic-cement", and set the 'name' to describe the material followed by "(to be quoted)".
       5.  Quantities should be sensible (e.g., "m²" for paving, "m³" for aggregates, "bags" or "tubs" for cement/pointing compound).
