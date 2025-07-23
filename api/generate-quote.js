@@ -35,9 +35,8 @@ export default async function handler(req, res) {
     const genAI = new GoogleGenerativeAI(apiKey);
     
     const keywords = extractKeywords(jobDescription);
-    const searchQuery = `site:attradeprice.co.uk ${keywords} pointing compound OR paving slabs OR MOT type 1`;
+    const searchQuery = `site:attradeprice.co.uk ${keywords} OR "natural stone paving" OR "pointing compound"`;
     
-    // Correctly enable the Google Search tool using the new name
     const model = genAI.getGenerativeModel({ 
         model: "gemini-1.5-flash",
         tools: [{ "google_search_retrieval": {}}]
@@ -54,11 +53,12 @@ export default async function handler(req, res) {
       "${jobDescription}"
 
       **Instructions & Rules:**
-      1.  Execute a search using the provided query to find products on the website. Analyze the search results.
-      2.  Based on the job description, calculate the required quantity for each necessary material. Assume a 10% waste factor for materials like paving and aggregates.
-      3.  **NEW INSTRUCTION:** If you find multiple suitable products for a single material requirement (e.g., different colors of "pointing compound" or different types of "natural stone"), you MUST include them as an array of 'options'.
-      4.  **Crucially:** If you identify a material needed for the job (e.g., "MOT Type 1 Sub-base", "Cement") but you **cannot** find a specific product for it in the search results, you MUST still include it in the material list as a single item (not with options). For these items, set the 'name' to describe the material and add "(to be quoted)" at the end. Set the 'id' to a generic, descriptive string like "generic-mot1" or "generic-cement".
-      5.  Generate a JSON object with the following exact structure. Note the 'options' field which should be an array if multiple products are found, otherwise it should be null or omitted.
+      1.  Execute a search using the provided query to find products on the website.
+      2.  **Analyze the search results VERY carefully.** The search results contain the real product names available on the website.
+      3.  Based on the job description, calculate the required quantity for each necessary material. Assume a 10% waste factor for materials like paving and aggregates.
+      4.  **CRITICAL:** If you find multiple suitable products for a single material requirement (e.g., different colors of "pointing compound" or different types of "natural stone"), you MUST include them as an array of 'options'. **You MUST use the exact product titles from the search results for the 'name' in each option.** Do not invent or use example names.
+      5.  If you identify a material needed for the job (e.g., "MOT Type 1 Sub-base", "Cement") but you **cannot** find a specific product for it in the search results, you MUST still include it in the material list as a single item (not with options). For these items, set the 'name' to describe the material and add "(to be quoted)" at the end.
+      6.  Generate a JSON object with the following exact structure.
           {
             "materials": [
               { 
@@ -67,8 +67,8 @@ export default async function handler(req, res) {
                 "quantity": <calculated_quantity>, 
                 "unit": "<standard_unit>",
                 "options": [
-                    { "id": "<product_sku_1>", "name": "<Specific Product Name 1>" },
-                    { "id": "<product_sku_2>", "name": "<Specific Product Name 2>" }
+                    { "id": "<product_sku_or_url_1>", "name": "<EXACT Product Name from Search Result 1>" },
+                    { "id": "<product_sku_or_url_2>", "name": "<EXACT Product Name from Search Result 2>" }
                 ]
               },
               ...
@@ -78,7 +78,7 @@ export default async function handler(req, res) {
               "considerations": ["<consideration_1>", "<consideration_2>", ...]
             }
           }
-      6.  Your entire response MUST be only the raw JSON object. Do not include any extra text, explanations, or markdown formatting. The response must start with { and end with }.
+      7.  Your entire response MUST be only the raw JSON object. Do not include any extra text, explanations, or markdown formatting. The response must start with { and end with }.
     `;
 
     const result = await model.generateContent(prompt);

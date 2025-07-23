@@ -153,6 +153,8 @@ const QuoteOutput = ({ quote, tier, materialPrices, setMaterialPrices, companyDe
   const totalCost = useMemo(() => {
     if (!quote) return 0;
     return quote.materials.reduce((acc, item) => {
+      // For items with options, we don't include them in the manual price calculation
+      if (item.options && item.options.length > 0) return acc;
       const price = parseFloat(materialPrices[item.id]) || 0;
       return acc + (price * item.quantity);
     }, 0);
@@ -175,8 +177,9 @@ const QuoteOutput = ({ quote, tier, materialPrices, setMaterialPrices, companyDe
     const cartBaseUrl = 'https://attradeprice.co.uk/quote-cart/';
     const cartItems = quote.materials.map((item, index) => {
         let selectedName = item.name;
-        if (item.options && userSelections[item.id]) {
-            selectedName = userSelections[item.id];
+        // If the item has options, use the user's selection for the name
+        if (item.options && item.options.length > 0) {
+            selectedName = userSelections[item.id] || item.options[0].name;
         }
         const encodedName = encodeURIComponent(selectedName);
         return `item_${index+1}_name=${encodedName}&item_${index+1}_qty=${Math.ceil(item.quantity)}`;
@@ -235,15 +238,18 @@ const QuoteOutput = ({ quote, tier, materialPrices, setMaterialPrices, companyDe
                 <tr key={item.id} className="border-b">
                   <td className="p-3 font-medium text-gray-800">
                     {item.options && item.options.length > 0 ? (
-                        <select 
-                            value={userSelections[item.id] || item.options[0].name}
-                            onChange={(e) => handleSelectionChange(item.id, e.target.value)}
-                            className="w-full p-2 border border-gray-300 rounded-md focus:ring-brand focus:border-brand"
-                        >
-                            {item.options.map(option => (
-                                <option key={option.id} value={option.name}>{option.name}</option>
-                            ))}
-                        </select>
+                        <div className="flex flex-col gap-1">
+                            <span className="font-bold">{item.name}</span>
+                            <select
+                                value={userSelections[item.id] || item.options[0].name}
+                                onChange={(e) => handleSelectionChange(item.id, e.target.value)}
+                                className="w-full p-2 border border-gray-300 rounded-md focus:ring-brand focus:border-brand"
+                            >
+                                {item.options.map(option => (
+                                    <option key={option.id} value={option.name}>{option.name}</option>
+                                ))}
+                            </select>
+                        </div>
                     ) : (
                         item.name
                     )}
@@ -254,6 +260,8 @@ const QuoteOutput = ({ quote, tier, materialPrices, setMaterialPrices, companyDe
                       type="number"
                       placeholder="0.00"
                       className="w-24 p-1 border rounded-md text-right"
+                      // Disable price input for items with options, as price is determined by selection
+                      disabled={item.options && item.options.length > 0}
                       value={materialPrices[item.id] || ''}
                       onChange={(e) => handlePriceChange(item.id, e.target.value)}
                     />
@@ -450,7 +458,7 @@ export default function App() {
               <Button onClick={generateQuote} disabled={!canGenerate || isLoading}>
                 {isLoading ? (
                   <>
-                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0-0 24 24">
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
