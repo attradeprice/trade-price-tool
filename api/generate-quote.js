@@ -26,12 +26,13 @@ async function scrapeSearchResults(query) {
         const html = await response.text();
         const $ = cheerio.load(html);
         const products = [];
-        // Use the correct selector for the product container
-        $('.product-wrapper').each((i, el) => {
-            const title = $(el).find('.wd-entities-title a').text().trim();
-            const url = $(el).find('.wd-entities-title a').attr('href');
-            // Use the correct selector for the short description
-            const description = $(el).find('.woodmart-product-excerpt').text().trim();
+        // CORRECTED SELECTOR: Use the selector for the main product container on your site
+        $('.product.type-product').each((i, el) => {
+            // CORRECTED SELECTOR: Find the title within the h2 tag
+            const title = $(el).find('h2.woocommerce-loop-product__title a').text().trim();
+            const url = $(el).find('h2.woocommerce-loop-product__title a').attr('href');
+            // CORRECTED SELECTOR: Find the short description
+            const description = $(el).find('.woocommerce-product-details__short-description').text().trim();
             if (title && url) {
                 products.push({ title, url, description });
             }
