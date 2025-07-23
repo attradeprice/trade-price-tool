@@ -1,5 +1,19 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
+// Helper function to extract keywords from a job description
+function extractKeywords(description) {
+    const lowerDesc = description.toLowerCase();
+    const stopWords = new Set(['a', 'an', 'the', 'in', 'on', 'for', 'with', 'i', 'want', 'to', 'build', 'and', 'is', 'it', 'will', 'be', 'area', 'size', 'using', 'out', 'of']);
+    
+    const keywords = lowerDesc
+        .replace(/[^\w\s]/g, '') // remove punctuation
+        .split(/\s+/)
+        .filter(word => !stopWords.has(word) && word.length > 2);
+        
+    return [...new Set(keywords)].join(' '); // Return unique keywords as a string
+}
+
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', ['POST']);
@@ -19,23 +33,40 @@ export default async function handler(req, res) {
     }
 
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    
+    const keywords = extractKeywords(jobDescription);
+    const searchQuery = `site:attradeprice.co.uk ${keywords} pointing compound OR paving slabs OR MOT type 1`;
+    
+    const model = genAI.getGenerativeModel({ 
+        model: "gemini-1.5-flash",
+        tools: [{ "google_search": { "query": searchQuery } }]
+    });
 
     const prompt = `
       You are an expert quantity surveyor for a UK-based building materials supplier called "At Trade Price".
-      Your task is to analyze a customer's job description and use your general knowledge of building materials to create a material list and construction method.
+      Your task is to analyze a customer's job description and the provided Google Search results from the attradeprice.co.uk website to create a material list and construction method.
 
       **Customer Job Description:**
       "${jobDescription}"
 
       **Instructions & Rules:**
-      1.  Based on the job description, calculate the required quantity for each necessary material. Assume a 10% waste factor for materials like paving and aggregates.
-      2.  Use your knowledge to identify common UK building materials (e.g., "MOT Type 1 Sub-base", "General Purpose Cement", "Kiln-Dried Sand").
-      3.  **Crucially:** For every material you identify, you must present it as a generic item for merchants to quote on. For example, if the user asks for natural stone, you should list "Natural Stone Paving Slabs (to be quoted)". If they need cement, list "General Purpose Cement (to be quoted)".
-      4.  Generate a JSON object with the following exact structure:
+      1.  Analyze the provided search results from the \`google_search\` tool. These are the products available on the website.
+      2.  Based on the job description, calculate the required quantity for each necessary material. Assume a 10% waste factor for materials like paving and aggregates.
+      3.  **NEW INSTRUCTION:** If you find multiple suitable products for a single material requirement (e.g., different colors of "pointing compound" or different types of "natural stone"), you MUST include them as an array of 'options'.
+      4.  **Crucially:** If you identify a material needed for the job (e.g., "MOT Type 1 Sub-base", "Cement") but you **cannot** find a specific product for it in the search results, you MUST still include it in the material list as a single item (not with options). For these items, set the 'name' to describe the material and add "(to be quoted)" at the end. Set the 'id' to a generic, descriptive string like "generic-mot1" or "generic-cement".
+      5.  Generate a JSON object with the following exact structure. Note the 'options' field which should be an array if multiple products are found, otherwise it should be null or omitted.
           {
             "materials": [
-              { "id": "<generic-id>", "name": "<Generic Name (to be quoted)>", "quantity": <calculated_quantity>, "unit": "<standard_unit>" },
+              { 
+                "id": "<unique_id_for_material_group>", 
+                "name": "<Generic Name like 'Pointing Compound' or 'Natural Stone Paving'>", 
+                "quantity": <calculated_quantity>, 
+                "unit": "<standard_unit>",
+                "options": [
+                    { "id": "<product_sku_1>", "name": "<Specific Product Name 1>" },
+                    { "id": "<product_sku_2>", "name": "<Specific Product Name 2>" }
+                ]
+              },
               ...
             ],
             "method": {
@@ -43,7 +74,6 @@ export default async function handler(req, res) {
               "considerations": ["<consideration_1>", "<consideration_2>", ...]
             }
           }
-      5.  The 'id' for each material should be a generic, descriptive string (e.g., "generic-mot1", "generic-cement").
       6.  Your entire response MUST be only the raw JSON object. Do not include any extra text, explanations, or markdown formatting. The response must start with { and end with }.
     `;
 

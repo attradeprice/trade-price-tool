@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { Zap, FileText, UserCheck, Edit, Settings, Upload, Building, User } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Zap, FileText, UserCheck, Edit, Upload, Building, User, ShoppingCart, ChevronDown } from 'lucide-react';
 
 // --- Helper Components ---
 
@@ -89,6 +89,7 @@ const QuoteDetailsForm = ({ companyDetails, setCompanyDetails, customerDetails, 
                             </span>
                             <input type="file" onChange={handleLogoChange} accept="image/*" className="text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-brand/10 file:text-brand hover:file:bg-brand/20"/>
                         </div>
+                        <p className="text-xs text-gray-500 mt-1">Logo is for this session only and will not be saved.</p>
                     </div>
                 </div>
 
@@ -148,7 +149,7 @@ const TierSelector = ({ selectedTier, setSelectedTier }) => {
   );
 };
 
-const QuoteOutput = ({ quote, tier, materialPrices, setMaterialPrices, companyDetails, customerDetails, vatRate, logo }) => {
+const QuoteOutput = ({ quote, tier, materialPrices, setMaterialPrices, companyDetails, customerDetails, vatRate, logo, userSelections, setUserSelections }) => {
   const totalCost = useMemo(() => {
     if (!quote) return 0;
     return quote.materials.reduce((acc, item) => {
@@ -170,6 +171,24 @@ const QuoteOutput = ({ quote, tier, materialPrices, setMaterialPrices, companyDe
     };
   }, [quote, totalCost, vatRate]);
 
+  const handleAddToCart = () => {
+    const cartBaseUrl = 'https://attradeprice.co.uk/quote-cart/';
+    const cartItems = quote.materials.map((item, index) => {
+        let selectedName = item.name;
+        if (item.options && userSelections[item.id]) {
+            selectedName = userSelections[item.id];
+        }
+        const encodedName = encodeURIComponent(selectedName);
+        return `item_${index+1}_name=${encodedName}&item_${index+1}_qty=${Math.ceil(item.quantity)}`;
+    });
+    const cartUrl = `${cartBaseUrl}?${cartItems.join('&')}`;
+    window.open(cartUrl, '_blank');
+  };
+
+  const handleSelectionChange = (itemId, selectedName) => {
+      setUserSelections(prev => ({...prev, [itemId]: selectedName}));
+  };
+
   if (!quote) {
     return null;
   }
@@ -185,12 +204,21 @@ const QuoteOutput = ({ quote, tier, materialPrices, setMaterialPrices, companyDe
 
   return (
     <Card className="mt-8">
-      <h2 className="text-2xl sm:text-3xl font-bold text-gray-800 mb-6 border-b pb-4">Your Generated Plan</h2>
+      <div className="flex justify-between items-center mb-6 border-b pb-4">
+        <h2 className="text-2xl sm:text-3xl font-bold text-gray-800">Your Generated Plan</h2>
+        <button
+            onClick={handleAddToCart}
+            className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white bg-green-600 hover:bg-green-700 shadow-md hover:shadow-lg transition-all duration-300"
+        >
+            <ShoppingCart size={18} />
+            Add to Quote Cart
+        </button>
+      </div>
       <div className="mb-8">
         <h3 className="text-xl font-semibold text-gray-700 mb-4">Tier 1: Material List</h3>
-         <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg mb-4 text-sm text-yellow-800 flex items-center gap-2">
-            <Edit className="w-4 h-4" />
-            Enter the prices you receive from your merchants below to calculate the total material cost.
+         <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg mb-4 text-sm text-blue-800 flex items-center gap-2">
+            <ChevronDown className="w-4 h-4" />
+            For items with multiple options, use the dropdown to make your selection.
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left">
@@ -205,7 +233,21 @@ const QuoteOutput = ({ quote, tier, materialPrices, setMaterialPrices, companyDe
             <tbody>
               {materials.map(item => (
                 <tr key={item.id} className="border-b">
-                  <td className="p-3 font-medium text-gray-800">{item.name}</td>
+                  <td className="p-3 font-medium text-gray-800">
+                    {item.options && item.options.length > 0 ? (
+                        <select 
+                            value={userSelections[item.id] || item.options[0].name}
+                            onChange={(e) => handleSelectionChange(item.id, e.target.value)}
+                            className="w-full p-2 border border-gray-300 rounded-md focus:ring-brand focus:border-brand"
+                        >
+                            {item.options.map(option => (
+                                <option key={option.id} value={option.name}>{option.name}</option>
+                            ))}
+                        </select>
+                    ) : (
+                        item.name
+                    )}
+                  </td>
                   <td className="p-3 text-center text-gray-600">{item.quantity.toFixed(2)} {item.unit}</td>
                   <td className="p-3">
                     <input
@@ -313,12 +355,14 @@ export default function App() {
   const [customerDetails, setCustomerDetails] = useState({ name: '', address: '' });
   const [vatRate, setVatRate] = useState(20);
   const [logo, setLogo] = useState(null);
+  const [userSelections, setUserSelections] = useState({});
 
   const generateQuote = async () => {
     setIsLoading(true);
     setError(null);
     setQuote(null);
     setMaterialPrices({});
+    setUserSelections({});
 
     const API_ENDPOINT = '/api/generate-quote';
 
@@ -335,7 +379,7 @@ export default function App() {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || `API call failed with status: ${response.status}`);
+        throw new Error(errorData.details || errorData.error || `API call failed with status: ${response.status}`);
       }
 
       const parsedResponse = await response.json();
@@ -362,7 +406,7 @@ export default function App() {
 
     } catch (err) {
       console.error(err);
-      setError(`Sorry, something went wrong. ${err.message}`);
+      setError(`Sorry, something went wrong. Details: ${err.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -387,8 +431,6 @@ export default function App() {
           <div className="space-y-8">
             <JobInput jobDescription={jobDescription} setJobDescription={setJobDescription} />
             
-            <TierSelector selectedTier={selectedTier} setSelectedTier={setSelectedTier} />
-
             {selectedTier === 3 && (
                 <QuoteDetailsForm 
                     companyDetails={companyDetails}
@@ -401,6 +443,8 @@ export default function App() {
                     setLogo={setLogo}
                 />
             )}
+            
+            <TierSelector selectedTier={selectedTier} setSelectedTier={setSelectedTier} />
 
             <div className="text-center pt-4">
               <Button onClick={generateQuote} disabled={!canGenerate || isLoading}>
@@ -423,7 +467,7 @@ export default function App() {
             </div>
           </div>
           {error && <div className="mt-8 p-4 bg-red-100 border border-red-300 text-red-800 rounded-lg">{error}</div>}
-          {quote && <QuoteOutput quote={quote} tier={selectedTier} materialPrices={materialPrices} setMaterialPrices={setMaterialPrices} companyDetails={companyDetails} customerDetails={customerDetails} vatRate={vatRate} logo={logo} />}
+          {quote && <QuoteOutput quote={quote} tier={selectedTier} materialPrices={materialPrices} setMaterialPrices={setMaterialPrices} companyDetails={companyDetails} customerDetails={customerDetails} vatRate={vatRate} logo={logo} userSelections={userSelections} setUserSelections={setUserSelections} />}
         </main>
 
         <footer className="text-center mt-12 text-gray-500 text-sm">
