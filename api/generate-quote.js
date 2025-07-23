@@ -37,20 +37,24 @@ export default async function handler(req, res) {
     const keywords = extractKeywords(jobDescription);
     const searchQuery = `site:attradeprice.co.uk ${keywords} pointing compound OR paving slabs OR MOT type 1`;
     
+    // Correctly enable the Google Search tool
     const model = genAI.getGenerativeModel({ 
         model: "gemini-1.5-flash",
-        tools: [{ "google_search": { "query": searchQuery } }]
+        tools: [{ "google_search": {} }] // Just enable the tool, don't pass a query here
     });
 
     const prompt = `
       You are an expert quantity surveyor for a UK-based building materials supplier called "At Trade Price".
-      Your task is to analyze a customer's job description and the provided Google Search results from the attradeprice.co.uk website to create a material list and construction method.
+      Your task is to analyze a customer's job description. To do this, you MUST first perform a Google Search on the attradeprice.co.uk website to find relevant products.
+
+      **Search Query to Use:**
+      "${searchQuery}"
 
       **Customer Job Description:**
       "${jobDescription}"
 
       **Instructions & Rules:**
-      1.  Analyze the provided search results from the \`google_search\` tool. These are the products available on the website.
+      1.  Execute a search using the provided query to find products on the website. Analyze the search results.
       2.  Based on the job description, calculate the required quantity for each necessary material. Assume a 10% waste factor for materials like paving and aggregates.
       3.  **NEW INSTRUCTION:** If you find multiple suitable products for a single material requirement (e.g., different colors of "pointing compound" or different types of "natural stone"), you MUST include them as an array of 'options'.
       4.  **Crucially:** If you identify a material needed for the job (e.g., "MOT Type 1 Sub-base", "Cement") but you **cannot** find a specific product for it in the search results, you MUST still include it in the material list as a single item (not with options). For these items, set the 'name' to describe the material and add "(to be quoted)" at the end. Set the 'id' to a generic, descriptive string like "generic-mot1" or "generic-cement".
