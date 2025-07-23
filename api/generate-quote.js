@@ -14,7 +14,7 @@ function extractKeywords(description) {
     return [...new Set(keywords)].join(' '); // Return unique keywords as a string
 }
 
-// NEW: Helper function to scrape search results from your website
+// NEW: Helper function to scrape search results from your website, now including descriptions
 async function scrapeSearchResults(query) {
     const searchUrl = `https://attradeprice.co.uk/?s=${encodeURIComponent(query)}&post_type=product`;
     try {
@@ -26,11 +26,14 @@ async function scrapeSearchResults(query) {
         const html = await response.text();
         const $ = cheerio.load(html);
         const products = [];
+        // Use the correct selector for the product container
         $('.product-wrapper').each((i, el) => {
             const title = $(el).find('.wd-entities-title a').text().trim();
             const url = $(el).find('.wd-entities-title a').attr('href');
+            // Use the correct selector for the short description
+            const description = $(el).find('.woodmart-product-excerpt').text().trim();
             if (title && url) {
-                products.push({ title, url });
+                products.push({ title, url, description });
             }
         });
         return products;
@@ -73,11 +76,11 @@ export default async function handler(req, res) {
       **Customer Job Description:**
       "${jobDescription}"
 
-      **Scraped Products from attradeprice.co.uk:**
+      **Scraped Products from attradeprice.co.uk (including titles, URLs, and descriptions):**
       ${JSON.stringify(searchResults, null, 2)}
 
       **Instructions & Rules:**
-      1.  **Analyze the provided "Scraped Products" list.** This is the ONLY source of available products.
+      1.  **Analyze the provided "Scraped Products" list.** This is the ONLY source of available products. Use both the 'title' and the 'description' to understand what each product is.
       2.  Based on the job description, calculate the required quantity for each necessary material. Assume a 10% waste factor for materials like paving and aggregates.
       3.  **CRITICAL:** If you find multiple suitable products for a single material requirement (e.g., different colors of "pointing compound" or different types of "natural stone"), you MUST include them as an array of 'options'. **You MUST use the exact product titles from the scraped data for the 'name' in each option.**
       4.  If you identify a material needed for the job (e.g., "MOT Type 1 Sub-base", "Cement") but you **cannot** find a specific product for it in the scraped data, you MUST still include it in the material list as a single item (not with options). For these items, set the 'name' to describe the material and add "(to be quoted)" at the end.
