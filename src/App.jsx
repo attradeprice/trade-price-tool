@@ -67,13 +67,14 @@ const QuoteDetailsForm = ({ companyDetails, setCompanyDetails, customerDetails, 
 
     const handleLogoChange = (e) => {
         if (e.target.files && e.target.files[0]) {
-            setLogo(URL.createObjectURL(e.target.files[0]));
+            const logoUrl = URL.createObjectURL(e.target.files[0]);
+            setLogo(logoUrl);
         }
     };
 
     return (
         <Card>
-            <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mb-6">2. Customize Your Quote</h2>
+            <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mb-6">2. Customize Your Quote (Tier 3 Only)</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 {/* Your Company Details */}
                 <div className="space-y-4">
@@ -385,17 +386,21 @@ export default function App() {
         <main className="max-w-4xl mx-auto">
           <div className="space-y-8">
             <JobInput jobDescription={jobDescription} setJobDescription={setJobDescription} />
-            <QuoteDetailsForm 
-                companyDetails={companyDetails}
-                setCompanyDetails={setCompanyDetails}
-                customerDetails={customerDetails}
-                setCustomerDetails={setCustomerDetails}
-                vatRate={vatRate}
-                setVatRate={setVatRate}
-                logo={logo}
-                setLogo={setLogo}
-            />
+            
             <TierSelector selectedTier={selectedTier} setSelectedTier={setSelectedTier} />
+
+            {selectedTier === 3 && (
+                <QuoteDetailsForm 
+                    companyDetails={companyDetails}
+                    setCompanyDetails={setCompanyDetails}
+                    customerDetails={customerDetails}
+                    setCustomerDetails={setCustomerDetails}
+                    vatRate={vatRate}
+                    setVatRate={setVatRate}
+                    logo={logo}
+                    setLogo={setLogo}
+                />
+            )}
 
             <div className="text-center pt-4">
               <Button onClick={generateQuote} disabled={!canGenerate || isLoading}>
