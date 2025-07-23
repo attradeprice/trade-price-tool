@@ -37,10 +37,10 @@ export default async function handler(req, res) {
     const keywords = extractKeywords(jobDescription);
     const searchQuery = `site:attradeprice.co.uk ${keywords} pointing compound OR paving slabs OR MOT type 1`;
     
-    // CORRECTED: Use the new 'google_search_retrieval' tool name
+    // Correctly enable the Google Search tool using the new name
     const model = genAI.getGenerativeModel({ 
         model: "gemini-1.5-flash",
-        tools: [{ "google_search_retrieval": {} }] 
+        tools: [{ "google_search_retrieval": {}}]
     });
 
     const prompt = `
