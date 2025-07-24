@@ -1,5 +1,4 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import * as cheerio from 'cheerio';
 
 // Helper function to extract keywords from a job description
 function extractKeywords(description) {
@@ -11,34 +10,39 @@ function extractKeywords(description) {
         .split(/\s+/)
         .filter(word => !stopWords.has(word) && word.length > 2);
         
-    return [...new Set(keywords)].join(' '); // Return unique keywords as a string
+    // Add some common synonyms and related terms to improve search
+    const synonyms = {
+        'paving': 'paving OR slabs',
+        'stone': 'stone OR slate OR sandstone OR limestone',
+        'patio': 'patio OR paving',
+        'aggregate': 'aggregate OR sand OR cement OR mot'
+    };
+
+    let expandedKeywords = [...keywords];
+    keywords.forEach(kw => {
+        if (synonyms[kw]) {
+            expandedKeywords.push(synonyms[kw]);
+        }
+    });
+
+    return [...new Set(expandedKeywords)].join(' ');
 }
 
-// Helper function to scrape search results from your website, now including descriptions
-async function scrapeSearchResults(query) {
-    const searchUrl = `https://attradeprice.co.uk/?s=${encodeURIComponent(query)}&post_type=product`;
+// NEW: Helper function to call your WordPress search API
+async function searchWordPressProducts(query) {
+    const searchUrl = `https://attradeprice.co.uk/wp-json/atp/v1/search-products?q=${encodeURIComponent(query)}`;
     try {
+        console.log(`--- WP API FETCH: Attempting to fetch URL: ${searchUrl} ---`);
         const response = await fetch(searchUrl);
         if (!response.ok) {
-            console.error(`Failed to fetch search results: ${response.statusText}`);
+            console.error(`Failed to fetch from WP API: ${response.statusText}`);
             return [];
         }
-        const html = await response.text();
-        const $ = cheerio.load(html);
-        const products = [];
-        // CORRECTED SELECTORS FOR YOUR 'WOODMART' THEME
-        $('.product-wrapper').each((i, el) => {
-            const title = $(el).find('h3.wd-entities-title a').text().trim();
-            const url = $(el).find('h3.wd-entities-title a').attr('href');
-            const description = $(el).find('.woodmart-product-excerpt').text().trim();
-            if (title && url) {
-                products.push({ title, url, description });
-            }
-        });
-        console.log(`Scraped ${products.length} products for query: "${query}"`);
+        const products = await response.json();
+        console.log(`--- WP API FETCH: Products received from WordPress API:`, products);
         return products;
     } catch (error) {
-        console.error("Error scraping website:", error);
+        console.error("Error calling WordPress API:", error);
         return [];
     }
 }
@@ -57,9 +61,11 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Missing jobDescription in request body' });
     }
 
-    // --- New Web Scraping Logic ---
+    // --- New WordPress API Logic ---
     const keywords = extractKeywords(jobDescription);
-    const searchResults = await scrapeSearchResults(keywords);
+    const searchResults = await searchWordPressProducts(keywords);
+    console.log(`--- AI INPUT: Product catalog for AI:`, searchResults);
+
 
     const apiKey = process.env.VITE_GOOGLE_API_KEY;
     if (!apiKey) {
@@ -71,19 +77,19 @@ export default async function handler(req, res) {
 
     const prompt = `
       You are an expert quantity surveyor for a UK-based building materials supplier called "At Trade Price".
-      Your task is to analyze a customer's job description and a provided list of relevant products scraped directly from the attradeprice.co.uk website.
+      Your task is to analyze a customer's job description and a provided list of relevant products fetched directly from the attradeprice.co.uk website's product catalog.
 
       **Customer Job Description:**
       "${jobDescription}"
 
-      **Scraped Products from attradeprice.co.uk (including titles, URLs, and descriptions):**
+      **Product Catalog from attradeprice.co.uk (JSON format):**
       ${JSON.stringify(searchResults, null, 2)}
 
       **Instructions & Rules:**
-      1.  **Analyze the provided "Scraped Products" list.** This is the ONLY source of available products. Use both the 'title' and the 'description' to understand what each product is.
+      1.  **Analyze the provided "Product Catalog" list.** This is the ONLY source of available products. Use both the 'title' and the 'description' to understand what each product is.
       2.  Based on the job description, calculate the required quantity for each necessary material. Assume a 10% waste factor for materials like paving and aggregates.
-      3.  **CRITICAL:** If you find multiple suitable products for a single material requirement (e.g., different colors of "pointing compound" or different types of "natural stone"), you MUST include them as an array of 'options'. **You MUST use the exact product titles from the scraped data for the 'name' in each option.**
-      4.  If you identify a material needed for the job (e.g., "MOT Type 1 Sub-base", "Cement") but you **cannot** find a specific product for it in the scraped data, you MUST still include it in the material list as a single item (not with options). For these items, set the 'name' to describe the material and add "(to be quoted)" at the end.
+      3.  **CRITICAL:** If you find multiple suitable products for a single material requirement (e.g., different colors of "pointing compound" or different types of "natural stone"), you MUST include them as an array of 'options'. **You MUST use the exact product titles from the provided data for the 'name' in each option.**
+      4.  If you identify a material needed for the job (e.g., "MOT Type 1 Sub-base", "Cement") but you **cannot** find a specific product for it in the provided data, you MUST still include it in the material list as a single item (not with options). For these items, set the 'name' to describe the material and add "(to be quoted)" at the end.
       5.  Generate a JSON object with the following exact structure.
           {
             "materials": [
@@ -93,8 +99,8 @@ export default async function handler(req, res) {
                 "quantity": <calculated_quantity>, 
                 "unit": "<standard_unit>",
                 "options": [
-                    { "id": "<product_url_1>", "name": "<EXACT Product Name from Scraped Data 1>" },
-                    { "id": "<product_url_2>", "name": "<EXACT Product Name from Scraped Data 2>" }
+                    { "id": "<product_url_1>", "name": "<EXACT Product Name from Data 1>" },
+                    { "id": "<product_url_2>", "name": "<EXACT Product Name from Data 2>" }
                 ]
               },
               ...
@@ -110,6 +116,10 @@ export default async function handler(req, res) {
     const result = await model.generateContent(prompt);
     const response = await result.response;
     let aiResponseText = response.text();
+
+    console.log("--- AI RAW RESPONSE ---");
+    console.log(aiResponseText);
+    console.log("--- END AI RAW RESPONSE ---");
 
     const jsonStart = aiResponseText.indexOf('{');
     const jsonEnd = aiResponseText.lastIndexOf('}');
