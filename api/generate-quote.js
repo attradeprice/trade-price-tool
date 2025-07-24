@@ -14,7 +14,7 @@ function extractKeywords(description) {
     return [...new Set(keywords)].join(' '); // Return unique keywords as a string
 }
 
-// NEW: Helper function to scrape search results from your website, now including descriptions
+// Helper function to scrape search results from your website, now including descriptions
 async function scrapeSearchResults(query) {
     const searchUrl = `https://attradeprice.co.uk/?s=${encodeURIComponent(query)}&post_type=product`;
     try {
@@ -26,7 +26,7 @@ async function scrapeSearchResults(query) {
         const html = await response.text();
         const $ = cheerio.load(html);
         const products = [];
-        // CORRECTED SELECTORS FOR 'WOODMART' THEME
+        // CORRECTED SELECTORS FOR YOUR 'WOODMART' THEME
         $('.product-wrapper').each((i, el) => {
             const title = $(el).find('h3.wd-entities-title a').text().trim();
             const url = $(el).find('h3.wd-entities-title a').attr('href');
