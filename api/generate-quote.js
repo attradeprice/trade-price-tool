@@ -12,10 +12,10 @@ function extractKeywords(description) {
         
     // Add some common synonyms and related terms to improve search
     const synonyms = {
-        'paving': 'paving OR slabs',
-        'stone': 'stone OR slate OR sandstone OR limestone',
-        'patio': 'patio OR paving',
-        'aggregate': 'aggregate OR sand OR cement OR mot'
+        'paving': 'paving slabs',
+        'stone': 'stone slate sandstone limestone',
+        'patio': 'patio paving',
+        'aggregate': 'aggregate sand cement mot'
     };
 
     let expandedKeywords = [...keywords];
