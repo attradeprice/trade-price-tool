@@ -1,52 +1,39 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// Helper function to extract keywords from a job description
+// ✅ Helper function to extract keywords from job description (minimal stop words, no synonym pollution)
 function extractKeywords(description) {
-    const lowerDesc = description.toLowerCase();
-    const stopWords = new Set(['a', 'an', 'the', 'in', 'on', 'for', 'with', 'i', 'want', 'to', 'build', 'and', 'is', 'it', 'will', 'be', 'area', 'size', 'using', 'out', 'of']);
-    
-    const keywords = lowerDesc
-        .replace(/[^\w\s]/g, '') // remove punctuation
-        .split(/\s+/)
-        .filter(word => !stopWords.has(word) && word.length > 2);
-        
-    // Add some common synonyms and related terms to improve search
-    const synonyms = {
-        'paving': 'paving slabs',
-        'stone': 'stone slate sandstone limestone',
-        'patio': 'patio paving',
-        'aggregate': 'aggregate sand cement mot'
-    };
+  const lowerDesc = description.toLowerCase();
+  const stopWords = new Set([
+    'a', 'an', 'the', 'in', 'on', 'for', 'with', 'i', 'want', 'to', 'build',
+    'and', 'is', 'it', 'will', 'be', 'area', 'size', 'using', 'out', 'of'
+  ]);
 
-    let expandedKeywords = [...keywords];
-    keywords.forEach(kw => {
-        if (synonyms[kw]) {
-            expandedKeywords.push(synonyms[kw]);
-        }
-    });
+  const keywords = lowerDesc
+    .replace(/[^\w\s]/g, '') // remove punctuation
+    .split(/\s+/)
+    .filter(word => !stopWords.has(word) && word.length > 2);
 
-    return [...new Set(expandedKeywords)].join(' ');
+  return [...new Set(keywords)].join(' ');
 }
 
-// NEW: Helper function to call your WordPress search API
+// ✅ Fetch products from WordPress search API using AI-extracted keywords
 async function searchWordPressProducts(query) {
-    const searchUrl = `https://attradeprice.co.uk/wp-json/atp/v1/search-products?q=${encodeURIComponent(query)}`;
-    try {
-        console.log(`--- WP API FETCH: Attempting to fetch URL: ${searchUrl} ---`);
-        const response = await fetch(searchUrl);
-        if (!response.ok) {
-            console.error(`Failed to fetch from WP API: ${response.statusText}`);
-            return [];
-        }
-        const products = await response.json();
-        console.log(`--- WP API FETCH: Products received from WordPress API:`, products);
-        return products;
-    } catch (error) {
-        console.error("Error calling WordPress API:", error);
-        return [];
+  const searchUrl = `https://attradeprice.co.uk/wp-json/atp/v1/search-products?q=${encodeURIComponent(query)}`;
+  try {
+    console.log(`--- WP API FETCH: Attempting to fetch URL: ${searchUrl} ---`);
+    const response = await fetch(searchUrl);
+    if (!response.ok) {
+      console.error(`Failed to fetch from WP API: ${response.statusText}`);
+      return [];
     }
+    const products = await response.json();
+    console.log(`--- WP API FETCH: Products received from WordPress API:`, products);
+    return products;
+  } catch (error) {
+    console.error("Error calling WordPress API:", error);
+    return [];
+  }
 }
-
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -61,12 +48,12 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Missing jobDescription in request body' });
     }
 
-    // --- New WordPress API Logic ---
+    // 🔍 AI keyword extraction and product lookup
     const keywords = extractKeywords(jobDescription);
     const searchResults = await searchWordPressProducts(keywords);
     console.log(`--- AI INPUT: Product catalog for AI:`, searchResults);
 
-
+    // 🔐 Load Gemini AI model
     const apiKey = process.env.VITE_GOOGLE_API_KEY;
     if (!apiKey) {
       throw new Error("API key not found.");
@@ -75,6 +62,7 @@ export default async function handler(req, res) {
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
+    // 🧠 Gemini prompt
     const prompt = `
       You are an expert quantity surveyor for a UK-based building materials supplier called "At Trade Price".
       Your task is to analyze a customer's job description and a provided list of relevant products fetched directly from the attradeprice.co.uk website's product catalog.
@@ -127,8 +115,8 @@ export default async function handler(req, res) {
     if (jsonStart === -1 || jsonEnd === -1) {
       throw new Error("AI did not return a valid JSON object.");
     }
-    aiResponseText = aiResponseText.substring(jsonStart, jsonEnd + 1);
 
+    aiResponseText = aiResponseText.substring(jsonStart, jsonEnd + 1);
     const parsedJsonResponse = JSON.parse(aiResponseText);
 
     res.status(200).json(parsedJsonResponse);
