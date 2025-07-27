@@ -77,7 +77,6 @@ async function searchWordPressProducts(keywords) {
       return [];
     }
     const products = await response.json();
-    // The new PHP returns a clean list, so no need for a Map.
     return products;
   } catch (error) {
     console.error(`Error fetching keywords '${searchQuery}':`, error.message);
@@ -90,7 +89,7 @@ function filterByNaturalStonePreference(products, jobDescription) {
   if (!prefersNatural) return products;
   const naturalStoneTerms = ['sandstone', 'limestone', 'slate', 'granite', 'travertine', 'yorkstone', 'porphyry', 'stone'];
   return products.filter(p => {
-    const text = (p.name + ' ' + p.description).toLowerCase(); // Use 'name' to match new backend response
+    const text = (p.name + ' ' + p.description).toLowerCase();
     const isNatural = naturalStoneTerms.some(term => text.includes(term));
     const isConcrete = /concrete|utility|pressed/.test(text);
     return isNatural && !isConcrete;
@@ -98,8 +97,9 @@ function filterByNaturalStonePreference(products, jobDescription) {
 }
 
 export default async function handler(req, res) {
-  // Diagnostic log to confirm which version of the code is running
   console.log("--- EXECUTING CODE VERSION: JULY 27 @ 6:05 PM ---");
+  
+console.log("RAW AI RESPONSE:\n", aiText);
 
   if (req.method !== 'POST') {
     res.setHeader('Allow', ['POST']);
@@ -122,7 +122,6 @@ export default async function handler(req, res) {
       keywords = fallbackKeywordExtractor(jobDescription);
     }
 
-    // This function now makes only ONE API call.
     let searchResults = await searchWordPressProducts(keywords);
     searchResults = filterByNaturalStonePreference(searchResults, jobDescription);
 
@@ -153,15 +152,22 @@ export default async function handler(req, res) {
              "considerations": [...]
            }
          }
-      8. Respond with the raw JSON only. No markdown, text, or formatting.
+    8. Respond ONLY with a valid JSON object matching the format above. Do not include any commentary, explanations, or markdown — just return the raw JSON data.
+
     `;
 
     const result = await model.generateContent(prompt);
     const aiText = result.response.text();
-    const jsonStart = aiText.indexOf('{');
-    const jsonEnd = aiText.lastIndexOf('}');
-    if (jsonStart === -1 || jsonEnd === -1) throw new Error("AI did not return a valid JSON object.");
-    const parsed = JSON.parse(aiText.slice(jsonStart, jsonEnd + 1));
+    let jsonText;
+try {
+  jsonText = aiText.match(/\{[\s\S]*\}/)?.[0]; // matches the first JSON block
+  if (!jsonText) throw new Error("No JSON found in AI response.");
+  const parsed = JSON.parse(jsonText);
+  return res.status(200).json(parsed);
+} catch (err) {
+  console.error("Failed to parse AI JSON:", err.message, "\nAI Response:", aiText);
+  return res.status(500).json({ error: "Failed to parse AI response as valid JSON.", rawResponse: aiText });
+}
     return res.status(200).json(parsed);
 
   } catch (error) {
