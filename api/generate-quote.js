@@ -89,8 +89,9 @@ export default async function handler(req, res) {
       1.  **Analyze the provided "Product Catalog" list.** This is the ONLY source of available products. Use both the 'title' and the 'description' to understand what each product is.
       2.  Based on the job description, calculate the required quantity for each necessary material. Assume a 10% waste factor for materials like paving and aggregates.
       3.  **CRITICAL:** If you find multiple suitable products for a single material requirement (e.g., different colors of "pointing compound" or different types of "natural stone"), you MUST include them as an array of 'options'. **You MUST use the exact product titles from the provided data for the 'name' in each option.**
-      4.  If you identify a material needed for the job (e.g., "MOT Type 1 Sub-base", "Cement") but you **cannot** find a specific product for it in the provided data, you MUST still include it in the material list as a single item (not with options). For these items, set the 'name' to describe the material and add "(to be quoted)" at the end.
-      5.  Generate a JSON object with the following exact structure.
+      4.  If the user asks for "natural stone", you MUST exclude any products from the options that contain the words "concrete", "utility", or "pressed" in their title or description.
+      5.  If you identify a material needed for the job (e.g., "MOT Type 1 Sub-base", "Cement") but you **cannot** find a specific product for it in the provided data, you MUST still include it in the material list as a single item (not with options). For these items, set the 'name' to describe the material and add "(to be quoted)" at the end.
+      6.  Generate a JSON object with the following exact structure. You MUST include the 'image' field in the options.
           {
             "materials": [
               { 
@@ -99,8 +100,8 @@ export default async function handler(req, res) {
                 "quantity": <calculated_quantity>, 
                 "unit": "<standard_unit>",
                 "options": [
-                    { "id": "<product_url_1>", "name": "<EXACT Product Name from Data 1>" },
-                    { "id": "<product_url_2>", "name": "<EXACT Product Name from Data 2>" }
+                    { "id": "<product_url_1>", "name": "<EXACT Product Name from Data 1>", "image": "<image_url_1>" },
+                    { "id": "<product_url_2>", "name": "<EXACT Product Name from Data 2>", "image": "<image_url_2>" }
                 ]
               },
               ...
@@ -110,7 +111,7 @@ export default async function handler(req, res) {
               "considerations": ["<consideration_1>", "<consideration_2>", ...]
             }
           }
-      6.  Your entire response MUST be only the raw JSON object. Do not include any extra text, explanations, or markdown formatting. The response must start with { and end with }.
+      7.  Your entire response MUST be only the raw JSON object. Do not include any extra text, explanations, or markdown formatting. The response must start with { and end with }.
     `;
 
     const result = await model.generateContent(prompt);
