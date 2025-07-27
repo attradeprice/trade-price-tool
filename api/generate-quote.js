@@ -1,54 +1,53 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// words that should not be used for searching
+// words to ignore during keyword extraction
 const stopWords = new Set([
   'a','an','the','in','on','for','with','i','want','to','build','and','is',
-  'it','will','be','area','size','using','out','of','which','currently','metres'
+  'it','will','be','area','size','using','out','of','which','currently',
+  'grass','metres','meter','long','high'
 ]);
 
-// synonyms map – each word maps to an array of synonyms/related terms
+// synonyms map – arrays of related search terms
 const synonyms = {
   paving:    ['paving','slabs'],
   stone:     ['stone','slate','sandstone','limestone'],
   patio:     ['patio','paving'],
   aggregate: ['aggregate','sand','cement','mot'],
-  block:     ['block','concrete block'],
-  brick:     ['brick','red brick']
+  brick:     ['brick','block','red brick'],
+  block:     ['block','concrete block']
 };
 
-// Turn a job description into a list of unique search keywords
+// Extracts a set of meaningful keywords (and their synonyms) from the job description
 function extractKeywords(description) {
-  const words   = description.toLowerCase().replace(/[^\w\s]/g,'').split(/\s+/);
-  const keywordSet = new Set();
-
+  const words = description.toLowerCase().replace(/[^\w\s]/g,'').split(/\s+/);
+  const keywords = new Set();
   for (const w of words) {
-    if (!stopWords.has(w) && w.length > 2 && !/^\d+(x\d+)?$/.test(w)) {
-      keywordSet.add(w);
+    // skip stop‑words, numbers and very short tokens
+    if (w && !stopWords.has(w) && !/^\d+(x\d+)?$/.test(w) && w.length > 2) {
+      keywords.add(w);
       if (synonyms[w]) {
-        synonyms[w].forEach(syn => keywordSet.add(syn));
+        synonyms[w].forEach(syn => keywords.add(syn));
       }
     }
   }
-  return Array.from(keywordSet);
+  return Array.from(keywords);
 }
 
-// Fetch products for a single keyword
-async function fetchProductsForKeyword(keyword) {
-  const url = `https://attradeprice.co.uk/wp-json/atp/v1/search-products?q=${encodeURIComponent(keyword)}`;
-  const response = await fetch(url);
-  if (!response.ok) return [];
-  return await response.json();
-}
-
-// Fetch products for multiple keywords, merging duplicates
+// Calls your WP search endpoint once, with all keywords as a single query string
 async function searchWordPressProducts(keywords) {
-  const resultMap = new Map();
-  // limit to the first 5 keywords to avoid making too many requests
-  for (const kw of keywords.slice(0, 5)) {
-    const products = await fetchProductsForKeyword(kw);
-    products.forEach(p => resultMap.set(p.url, p));
+  if (!keywords.length) return [];
+  // Join all keywords with spaces – the WP endpoint uses wildcard matching internally
+  const query = keywords.join(' ');
+  const url   = `https://attradeprice.co.uk/wp-json/atp/v1/search-products?q=${encodeURIComponent(query)}`;
+  console.log(`--- WP API FETCH: Attempting to fetch URL: ${url} ---`);
+  const response = await fetch(url);
+  if (!response.ok) {
+    console.error(`Failed to fetch from WP API: ${response.statusText}`);
+    return [];
   }
-  return Array.from(resultMap.values());
+  const products = await response.json();
+  console.log(`--- WP API FETCH: Products received from WordPress API:`, products);
+  return products;
 }
 
 export default async function handler(req, res) {
@@ -63,8 +62,8 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Missing jobDescription in request body' });
     }
 
-    // Extract keywords and search for products per keyword
-    const keywords    = extractKeywords(jobDescription);
+    // Extract all relevant keywords and run a single search
+    const keywords      = extractKeywords(jobDescription);
     const searchResults = await searchWordPressProducts(keywords);
     console.log(`--- AI INPUT: Product catalog for AI:`, searchResults);
 
@@ -116,14 +115,12 @@ export default async function handler(req, res) {
     const aiText    = result.response.text();
     const jsonStart = aiText.indexOf('{');
     const jsonEnd   = aiText.lastIndexOf('}');
-    if (jsonStart === -1 || jsonEnd === -1) {
-      throw new Error("AI did not return a valid JSON object.");
-    }
-    const json = JSON.parse(aiText.slice(jsonStart, jsonEnd + 1));
-    return res.status(200).json(json);
+    if (jsonStart === -1 || jsonEnd === -1) throw new Error("AI did not return a valid JSON object.");
+    const parsed    = JSON.parse( aiText.slice(jsonStart, jsonEnd + 1) );
+    return res.status(200).json(parsed);
 
   } catch (error) {
     console.error("Error in serverless function:", error);
-    return res.status(500).json({ error: 'An internal server error occurred.', details: error.message });
+    return res.status(500).json({ error: "An internal server error occurred.", details: error.message });
   }
 }
