@@ -1,15 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-
-/*
- * This module drives the quote generation logic.  It:
- *  1. Extracts search keywords via Gemini.
- *  2. Falls back to a synonym-based extractor if needed.
- *  3. Queries the WordPress API once per keyword, deduplicating results.
- *  4. Filters out concrete slabs if the job specifies natural stone.
- *  5. Asks Gemini to produce a detailed materials list and method,
- *     including sub-base depths, bedding layer thickness, primers,
- *     jointing compounds and safety considerations.
- */
+import React, { useState } from 'react';
 
 // Stopwords to ignore when extracting keywords.
 const stopWords = new Set([
@@ -18,11 +8,7 @@ const stopWords = new Set([
   'grass','metres','meter','long','high'
 ]);
 
-/*
- * Fallback synonyms used only if the AI fails to extract any keywords.
- * Expand these lists as needed.  They cover natural stone types,
- * aggregates, mortar/jointing, adhesives and primers.
- */
+// Fallback synonyms used only if the AI fails to extract any keywords.
 const fallbackSynonyms = {
   paving:    ['paving','slabs'],
   stone:     ['stone','sandstone','limestone','slate','granite','travertine','quartzite','basalt','yorkstone','porphyry'],
@@ -35,10 +21,6 @@ const fallbackSynonyms = {
   adhesive:  ['adhesive','primer','slurry primer','sbr','pva','bonding agent','tile adhesive']
 };
 
-/**
- * Ask Gemini to extract relevant material, product and accessory keywords
- * from a job description.  The model returns a comma-separated list of nouns.
- */
 async function getSearchKeywords(description, model) {
   const extractionPrompt = `
     Identify all distinct material, product, consumable or accessory keywords
@@ -63,10 +45,6 @@ async function getSearchKeywords(description, model) {
   }
 }
 
-/**
- * Fallback keyword extractor.  If the AI fails to extract any keywords,
- * this function uses a simple heuristic with a limited synonym map.
- */
 function fallbackKeywordExtractor(description) {
   const words = description.toLowerCase().replace(/[^\w\s]/g,'').split(/\s+/);
   const keywords = new Set();
@@ -81,9 +59,6 @@ function fallbackKeywordExtractor(description) {
   return Array.from(keywords);
 }
 
-/**
- * Query the WP product search API for each keyword separately.
- */
 async function searchWordPressProducts(keywords) {
   const resultsMap = new Map();
   for (const kw of keywords) {
@@ -105,11 +80,6 @@ async function searchWordPressProducts(keywords) {
   return Array.from(resultsMap.values());
 }
 
-/**
- * Filter out concrete or utility slabs if the job specifically mentions
- * “natural stone”.  This prevents “pressed concrete” products from
- * appearing in the natural stone options.
- */
 function filterByNaturalStonePreference(products, jobDescription) {
   const prefersNatural = /natural\s+stone/i.test(jobDescription);
   if (!prefersNatural) return products;
@@ -134,27 +104,21 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Missing jobDescription in request body' });
     }
 
-    // Prepare Gemini client
     const apiKey = process.env.VITE_GOOGLE_API_KEY;
     if (!apiKey) throw new Error("API key not found.");
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-    // 1) Extract search keywords via AI
     let keywords = await getSearchKeywords(jobDescription, model);
     if (!keywords || keywords.length === 0) {
       keywords = fallbackKeywordExtractor(jobDescription);
     }
 
-    // 2) Query each keyword separately and combine results
     let searchResults = await searchWordPressProducts(keywords);
-
-    // 3) Optionally filter out concrete slabs if natural stone is requested
     searchResults = filterByNaturalStonePreference(searchResults, jobDescription);
 
     console.log(`--- AI INPUT: Product catalog for AI:`, searchResults);
 
-    // 4) Ask the model to produce a detailed materials list and construction method
     const prompt = `
       You are an expert quantity surveyor for a UK-based building materials supplier called "At Trade Price".
       Your task is to analyze a customer's job description and a provided list of relevant products fetched directly from the attradeprice.co.uk website's product catalog.
@@ -166,38 +130,21 @@ export default async function handler(req, res) {
       ${JSON.stringify(searchResults, null, 2)}
 
       **Instructions & Rules:**
-      1.  **Analyze the provided "Product Catalog" list.** This is the ONLY source of available products. Use both the 'title' and the 'description' to understand what each product is.
-      2.  Based on the job description, calculate the required quantity for each necessary material. For patios, use:
-          • Excavation depth: 100 mm for foot traffic, 150 mm for vehicular loads.  
-          • Sub-base volume = area × excavation depth; add 10 % waste.  
-          • Bedding layer thickness: 30 mm of mortar; calculate volume and convert to bags of sand and cement.  
-          • Paving coverage: number of slabs = area ÷ slab area; add 10 % waste.  
-          Adjust similar calculations for other trades (e.g. pipe runs, number of taps, length of conduit).
-      3.  **Include ancillary materials:** primers/bonding slurries, jointing compounds or mortar (with mix ratios and curing times), weed membranes, edge restraints, drainage channels, fixings, safety equipment (PPE), or any other consumables required.  If no matching product exists in the catalogue, list the item as "(to be quoted)".
-      4.  **When listing products in the "options" array, strip any size or pack information** (e.g. "450 × 450", "600 mm × 600 mm", "Pack of 25") from the product names before presenting them to the user.  Use only the descriptive part of the name.
-      5.  If you identify multiple suitable products for a single material (e.g. different colours of "pointing compound" or different types of natural stone), include them as an array of 'options'.  Use the exact product titles from the provided data (after stripping sizes) for the 'name' in each option.
-      6.  Provide a **detailed step-by-step construction method and important considerations**, including excavation depths, layer thicknesses, mix ratios, priming instructions, jointing, drainage falls (e.g. 1:80 away from buildings) and curing times.
-      7.  Generate a JSON object with the following exact structure:
-          {
-            "materials": [
-              {
-                "id": "<unique_id_for_material_group>",
-                "name": "<Generic Name like 'Pointing Compound' or 'Natural Stone Paving'>",
-                "quantity": <calculated_quantity>,
-                "unit": "<standard_unit>",
-                "options": [
-                  { "id": "<product_url_1>", "name": "<EXACT Product Name from Data 1>" },
-                  { "id": "<product_url_2>", "name": "<EXACT Product Name from Data 2>" }
-                ]
-              },
-              ...
-            ],
-            "method": {
-              "steps": ["<step_1>", "<step_2>", ...],
-              "considerations": ["<consideration_1>", "<consideration_2>", ...]
-            }
-          }
-      8.  Your entire response MUST be only the raw JSON object. Do not include any extra text, explanations, or markdown formatting.  The response must start with { and end with }.
+      1. Analyze the provided "Product Catalog" list.
+      2. Based on the job description, calculate the required quantity for each necessary material.
+      3. Include ancillary materials such as primers, membranes, fixings, PPE, etc. Mark unavailable items as "(to be quoted)".
+      4. Strip any size or pack info from product names in the 'options'.
+      5. For multiple product matches, return them as option arrays with 'id' and 'name'.
+      6. Include a detailed construction method with excavation, bedding, priming, jointing, drainage and curing steps.
+      7. Return the JSON object with this exact format:
+         {
+           "materials": [...],
+           "method": {
+             "steps": [...],
+             "considerations": [...]
+           }
+         }
+      8. Respond with the raw JSON only. No markdown, text, or formatting.
     `;
 
     const result    = await model.generateContent(prompt);
@@ -213,3 +160,54 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "An internal server error occurred.", details: error.message });
   }
 }
+
+// -------------------- UI Dropdown Component ------------------------
+
+function ProductDropdown({ options, value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const selected = options.find(opt => opt.name === value) || options[0];
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="w-full p-2 border rounded flex items-center bg-white"
+      >
+        {selected.image && (
+          <img
+            src={selected.image}
+            alt={selected.name}
+            className="w-6 h-6 mr-2 object-cover rounded"
+          />
+        )}
+        <span>{selected.name}</span>
+      </button>
+      {open && (
+        <ul className="absolute z-10 mt-1 w-full bg-white border rounded shadow-lg max-h-60 overflow-auto">
+          {options.map(opt => (
+            <li
+              key={opt.id}
+              onClick={() => {
+                onChange(opt.name);
+                setOpen(false);
+              }}
+              className="p-2 hover:bg-gray-100 cursor-pointer flex items-center"
+            >
+              {opt.image && (
+                <img
+                  src={opt.image}
+                  alt={opt.name}
+                  className="w-6 h-6 mr-2 object-cover rounded"
+                />
+              )}
+              <span>{opt.name}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+export default ProductDropdown;
