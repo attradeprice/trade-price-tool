@@ -12,7 +12,11 @@ function ProductDropdown({ options, value, onChange }) {
         className="w-full p-2 border rounded flex items-center bg-white"
       >
         {selected.image && (
-          <img src={selected.image} alt={selected.name} className="w-6 h-6 mr-2 object-cover rounded" />
+          <img
+            src={selected.image}
+            alt={selected.name}
+            className="w-6 h-6 mr-2 object-cover rounded"
+          />
         )}
         <span>{selected.name}</span>
       </button>
@@ -21,11 +25,18 @@ function ProductDropdown({ options, value, onChange }) {
           {options.map(opt => (
             <li
               key={opt.id}
-              onClick={() => { onChange(opt.name); setOpen(false); }}
+              onClick={() => {
+                onChange(opt.name);
+                setOpen(false);
+              }}
               className="p-2 hover:bg-gray-100 cursor-pointer flex items-center"
             >
               {opt.image && (
-                <img src={opt.image} alt={opt.name} className="w-6 h-6 mr-2 object-cover rounded" />
+                <img
+                  src={opt.image}
+                  alt={opt.name}
+                  className="w-6 h-6 mr-2 object-cover rounded"
+                />
               )}
               <span>{opt.name}</span>
             </li>
