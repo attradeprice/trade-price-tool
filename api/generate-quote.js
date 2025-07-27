@@ -1,38 +1,79 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// ✅ Helper function to extract keywords from job description (minimal stop words, no synonym pollution)
-function extractKeywords(description) {
-  const lowerDesc = description.toLowerCase();
-  const stopWords = new Set([
-    'a', 'an', 'the', 'in', 'on', 'for', 'with', 'i', 'want', 'to', 'build',
-    'and', 'is', 'it', 'will', 'be', 'area', 'size', 'using', 'out', 'of'
-  ]);
+// STEP 1: Call Gemini to extract intelligent search terms
+async function extractSearchKeywordsFromAI(description, model) {
+  const prompt = `
+    Based on the following construction job description, return a list of concise search keywords
+    you would use to find relevant UK building materials from a merchant's online product catalog.
 
-  const keywords = lowerDesc
-    .replace(/[^\w\s]/g, '') // remove punctuation
-    .split(/\s+/)
-    .filter(word => !stopWords.has(word) && word.length > 2);
+    Focus on material types, tools, and job components.
+    Output as a plain JavaScript array of lowercase search terms.
 
-  return [...new Set(keywords)].join(' ');
+    Job Description:
+    """
+    ${description}
+    """
+
+    Response format:
+    ["keyword1", "keyword2", "keyword3"]
+  `;
+
+  const result = await model.generateContent(prompt);
+  const response = await result.response;
+  const text = response.text();
+  const jsonStart = text.indexOf('[');
+  const jsonEnd = text.lastIndexOf(']') + 1;
+  const cleaned = text.substring(jsonStart, jsonEnd);
+  return JSON.parse(cleaned);
 }
 
-// ✅ Fetch products from WordPress search API using AI-extracted keywords
-async function searchWordPressProducts(query) {
+// STEP 2: Fetch matching products from WordPress
+async function searchWordPressProducts(keywords) {
+  const query = keywords.join(' ');
   const searchUrl = `https://attradeprice.co.uk/wp-json/atp/v1/search-products?q=${encodeURIComponent(query)}`;
-  try {
-    console.log(`--- WP API FETCH: Attempting to fetch URL: ${searchUrl} ---`);
-    const response = await fetch(searchUrl);
-    if (!response.ok) {
-      console.error(`Failed to fetch from WP API: ${response.statusText}`);
-      return [];
+  const response = await fetch(searchUrl);
+  if (!response.ok) throw new Error(`WP search failed: ${response.statusText}`);
+  return await response.json();
+}
+
+// STEP 3: Generate final plan and materials
+async function generatePlanWithAI(description, catalog, model) {
+  const prompt = `
+    You are a UK construction quantity surveyor AI assistant.
+    Based on the job description and product catalog, generate a material list and method.
+
+    Job Description:
+    """
+    ${description}
+    """
+
+    Product Catalog:
+    ${JSON.stringify(catalog, null, 2)}
+
+    Rules:
+    1. You may infer required materials based on UK standards.
+    2. You may include materials even if no product match exists, label them as "(to be quoted)".
+    3. For matching products, use exact title and link.
+    4. If multiple products match a material need, group them under 'options'.
+    5. Include image URLs.
+    6. Provide a detailed step-by-step method with technical depth, build-up layers, correct depths, and considerations.
+
+    Output JSON only:
+    {
+      "materials": [...],
+      "method": {
+        "steps": [...],
+        "considerations": [...]
+      }
     }
-    const products = await response.json();
-    console.log(`--- WP API FETCH: Products received from WordPress API:`, products);
-    return products;
-  } catch (error) {
-    console.error("Error calling WordPress API:", error);
-    return [];
-  }
+  `;
+
+  const result = await model.generateContent(prompt);
+  const response = await result.response;
+  const text = response.text();
+  const jsonStart = text.indexOf('{');
+  const jsonEnd = text.lastIndexOf('}') + 1;
+  return JSON.parse(text.substring(jsonStart, jsonEnd));
 }
 
 export default async function handler(req, res) {
@@ -43,86 +84,28 @@ export default async function handler(req, res) {
 
   try {
     const { jobDescription } = req.body;
+    if (!jobDescription) return res.status(400).json({ error: 'Missing jobDescription' });
 
-    if (!jobDescription) {
-      return res.status(400).json({ error: 'Missing jobDescription in request body' });
-    }
-
-    // 🔍 AI keyword extraction and product lookup
-    const keywords = extractKeywords(jobDescription);
-    const searchResults = await searchWordPressProducts(keywords);
-    console.log(`--- AI INPUT: Product catalog for AI:`, searchResults);
-
-    // 🔐 Load Gemini AI model
     const apiKey = process.env.VITE_GOOGLE_API_KEY;
-    if (!apiKey) {
-      throw new Error("API key not found.");
-    }
+    if (!apiKey) throw new Error('Google API key not found');
 
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
-    // 🧠 Gemini prompt
-    const prompt = `
-      You are an expert quantity surveyor for a UK-based building materials supplier called "At Trade Price".
-      Your task is to analyze a customer's job description and a provided list of relevant products fetched directly from the attradeprice.co.uk website's product catalog.
+    // Step 1: Extract smart keywords
+    const keywords = await extractSearchKeywordsFromAI(jobDescription, model);
+    console.log('Extracted Keywords:', keywords);
 
-      **Customer Job Description:**
-      "${jobDescription}"
+    // Step 2: Search WP
+    const products = await searchWordPressProducts(keywords);
+    console.log('Products Found:', products);
 
-      **Product Catalog from attradeprice.co.uk (JSON format):**
-      ${JSON.stringify(searchResults, null, 2)}
-
-      **Instructions & Rules:**
-      1.  **Analyze the provided "Product Catalog" list.** This is the ONLY source of available products. Use both the 'title' and the 'description' to understand what each product is.
-      2.  Based on the job description, calculate the required quantity for each necessary material. Assume a 10% waste factor for materials like paving and aggregates.
-      3.  **CRITICAL:** If you find multiple suitable products for a single material requirement (e.g., different colors of "pointing compound" or different types of "natural stone"), you MUST include them as an array of 'options'. **You MUST use the exact product titles from the provided data for the 'name' in each option.**
-      4.  If the user asks for "natural stone", you MUST exclude any products from the options that contain the words "concrete", "utility", or "pressed" in their title or description.
-      5.  If you identify a material needed for the job (e.g., "MOT Type 1 Sub-base", "Cement") but you **cannot** find a specific product for it in the provided data, you MUST still include it in the material list as a single item (not with options). For these items, set the 'name' to describe the material and add "(to be quoted)" at the end.
-      6.  Generate a JSON object with the following exact structure. You MUST include the 'image' field in the options.
-          {
-            "materials": [
-              { 
-                "id": "<unique_id_for_material_group>", 
-                "name": "<Generic Name like 'Pointing Compound' or 'Natural Stone Paving'>", 
-                "quantity": <calculated_quantity>, 
-                "unit": "<standard_unit>",
-                "options": [
-                    { "id": "<product_url_1>", "name": "<EXACT Product Name from Data 1>", "image": "<image_url_1>" },
-                    { "id": "<product_url_2>", "name": "<EXACT Product Name from Data 2>", "image": "<image_url_2>" }
-                ]
-              },
-              ...
-            ],
-            "method": {
-              "steps": ["<step_1>", "<step_2>", ...],
-              "considerations": ["<consideration_1>", "<consideration_2>", ...]
-            }
-          }
-      7.  Your entire response MUST be only the raw JSON object. Do not include any extra text, explanations, or markdown formatting. The response must start with { and end with }.
-    `;
-
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    let aiResponseText = response.text();
-
-    console.log("--- AI RAW RESPONSE ---");
-    console.log(aiResponseText);
-    console.log("--- END AI RAW RESPONSE ---");
-
-    const jsonStart = aiResponseText.indexOf('{');
-    const jsonEnd = aiResponseText.lastIndexOf('}');
-    if (jsonStart === -1 || jsonEnd === -1) {
-      throw new Error("AI did not return a valid JSON object.");
-    }
-
-    aiResponseText = aiResponseText.substring(jsonStart, jsonEnd + 1);
-    const parsedJsonResponse = JSON.parse(aiResponseText);
-
-    res.status(200).json(parsedJsonResponse);
+    // Step 3: Generate Plan
+    const output = await generatePlanWithAI(jobDescription, products, model);
+    res.status(200).json(output);
 
   } catch (error) {
-    console.error("Error in serverless function:", error);
-    res.status(500).json({ error: "An internal server error occurred.", details: error.message });
+    console.error('AI Quote Generator Error:', error);
+    res.status(500).json({ error: error.message || 'Internal Server Error' });
   }
 }
