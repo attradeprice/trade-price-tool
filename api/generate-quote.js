@@ -1,53 +1,116 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// words to ignore during keyword extraction
+/*
+ * This module contains the logic for generating quotes based on a
+ * customer’s job description.  It now performs two AI calls: one to
+ * extract relevant search keywords from the job description, and a
+ * second to generate the final quote based on the resulting product
+ * catalogue.
+ */
+
+// Fallback stopwords: words we never want to use as search terms.
 const stopWords = new Set([
   'a','an','the','in','on','for','with','i','want','to','build','and','is',
   'it','will','be','area','size','using','out','of','which','currently',
   'grass','metres','meter','long','high'
 ]);
 
-// synonyms map – arrays of related search terms
-const synonyms = {
+// Fallback synonyms for common construction terms.
+// These are used only if the AI keyword extraction fails.
+const fallbackSynonyms = {
   paving:    ['paving','slabs'],
-  stone:     ['stone','slate','sandstone','limestone'],
+  stone:     ['stone','sandstone','limestone','slate','granite','travertine','quartzite','basalt'],
   patio:     ['patio','paving'],
   aggregate: ['aggregate','sand','cement','mot'],
   brick:     ['brick','block','red brick'],
-  block:     ['block','concrete block']
+  block:     ['block','concrete block'],
 };
 
-// Extracts a set of meaningful keywords (and their synonyms) from the job description
-function extractKeywords(description) {
+/**
+ * Uses Gemini to extract a set of search keywords from a job description.
+ * The model is asked to list only nouns and material types that would
+ * be useful for querying the product database.
+ *
+ * @param {string} description The customer’s job description.
+ * @param {Object} model An instance of a generative model.
+ * @returns {Promise<string[]>} A list of keywords.
+ */
+async function getSearchKeywords(description, model) {
+  const extractionPrompt = `
+    Identify all distinct material or product keywords that could be
+    relevant when searching a building materials catalogue for the following
+    project description.  Only list nouns and material types (no
+    measurements, no verbs, no job‑steps).  Return them as a comma-
+    separated list without any additional text.
+
+    Job description: "${description}"
+  `;
+  try {
+    const result = await model.generateContent(extractionPrompt);
+    const text = result.response.text().trim();
+    // Split on commas and semicolons, trim whitespace, filter empty strings.
+    let keywords = text.split(/[;,]/).map(k => k.trim().toLowerCase()).filter(Boolean);
+    // Filter out stopwords and numeric values.
+    keywords = keywords.filter(w => !stopWords.has(w) && !/^\d+(x\d+)?$/.test(w));
+    // Remove duplicates.
+    return Array.from(new Set(keywords));
+  } catch (err) {
+    console.error('Keyword extraction failed:', err.message);
+    return [];
+  }
+}
+
+/**
+ * Fallback keyword extractor.  If the AI fails to extract any
+ * keywords, this function uses a simple heuristic with a limited
+ * synonym map.
+ *
+ * @param {string} description
+ * @returns {string[]}
+ */
+function fallbackKeywordExtractor(description) {
   const words = description.toLowerCase().replace(/[^\w\s]/g,'').split(/\s+/);
   const keywords = new Set();
   for (const w of words) {
-    // skip stop‑words, numbers and very short tokens
     if (w && !stopWords.has(w) && !/^\d+(x\d+)?$/.test(w) && w.length > 2) {
       keywords.add(w);
-      if (synonyms[w]) {
-        synonyms[w].forEach(syn => keywords.add(syn));
+      if (fallbackSynonyms[w]) {
+        fallbackSynonyms[w].forEach(syn => keywords.add(syn));
       }
     }
   }
   return Array.from(keywords);
 }
 
-// Calls your WP search endpoint once, with all keywords as a single query string
+/**
+ * Queries the WordPress product search API for each keyword and
+ * aggregates the results.  Each keyword is queried separately so
+ * that the underlying API doesn’t try to match all keywords in a
+ * single wildcard pattern.
+ *
+ * @param {string[]} keywords List of search keywords.
+ * @returns {Promise<Object[]>} Array of product objects.
+ */
 async function searchWordPressProducts(keywords) {
-  if (!keywords.length) return [];
-  // Join all keywords with spaces – the WP endpoint uses wildcard matching internally
-  const query = keywords.join(' ');
-  const url   = `https://attradeprice.co.uk/wp-json/atp/v1/search-products?q=${encodeURIComponent(query)}`;
-  console.log(`--- WP API FETCH: Attempting to fetch URL: ${url} ---`);
-  const response = await fetch(url);
-  if (!response.ok) {
-    console.error(`Failed to fetch from WP API: ${response.statusText}`);
-    return [];
+  const resultsMap = new Map();
+  for (const kw of keywords) {
+    if (!kw) continue;
+    const url = `https://attradeprice.co.uk/wp-json/atp/v1/search-products?q=${encodeURIComponent(kw)}`;
+    console.log(`--- WP API FETCH: Attempting to fetch URL: ${url} ---`);
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        console.error(`Failed to fetch from WP API (${kw}): ${response.statusText}`);
+        continue;
+      }
+      const products = await response.json();
+      console.log(`--- WP API FETCH: ${kw} returned`, products.length, 'products');
+      products.forEach(p => resultsMap.set(p.url, p));
+    } catch (error) {
+      console.error(`Error fetching keyword '${kw}':`, error.message);
+    }
   }
-  const products = await response.json();
-  console.log(`--- WP API FETCH: Products received from WordPress API:`, products);
-  return products;
+  return Array.from(resultsMap.values());
 }
 
 export default async function handler(req, res) {
@@ -62,17 +125,25 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Missing jobDescription in request body' });
     }
 
-    // Extract all relevant keywords and run a single search
-    const keywords      = extractKeywords(jobDescription);
-    const searchResults = await searchWordPressProducts(keywords);
-    console.log(`--- AI INPUT: Product catalog for AI:`, searchResults);
-
+    // Prepare generative AI client
     const apiKey = process.env.VITE_GOOGLE_API_KEY;
     if (!apiKey) throw new Error("API key not found.");
-
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
+    // Step 1: Ask the model for relevant search keywords based on the job description.
+    let keywords = await getSearchKeywords(jobDescription, model);
+
+    // If the model failed to produce any keywords, fall back to heuristic extraction.
+    if (!keywords || keywords.length === 0) {
+      keywords = fallbackKeywordExtractor(jobDescription);
+    }
+
+    // Step 2: Use those keywords to search the WordPress API.
+    const searchResults = await searchWordPressProducts(keywords);
+    console.log(`--- AI INPUT: Product catalog for AI:`, searchResults);
+
+    // Step 3: Ask the model to produce the final materials list and method based on the catalogue.
     const prompt = `
       You are an expert quantity surveyor for a UK-based building materials supplier called "At Trade Price".
       Your task is to analyze a customer's job description and a provided list of relevant products fetched directly from the attradeprice.co.uk website's product catalog.
@@ -87,7 +158,7 @@ export default async function handler(req, res) {
       1.  **Analyze the provided "Product Catalog" list.** This is the ONLY source of available products. Use both the 'title' and the 'description' to understand what each product is.
       2.  Based on the job description, calculate the required quantity for each necessary material. Assume a 10% waste factor for materials like paving and aggregates.
       3.  **CRITICAL:** If you find multiple suitable products for a single material requirement (e.g., different colors of "pointing compound" or different types of "natural stone"), you MUST include them as an array of 'options'. **You MUST use the exact product titles from the provided data for the 'name' in each option.**
-      4.  If you identify a material needed for the job (e.g., "MOT Type 1 Sub-base", "Cement") but you **cannot** find a specific product for it in the provided data, you MUST still include it in the material list as a single item (not with options). For these items, set the 'name' to describe the material and add "(to be quoted)" at the end.
+      4.  If you identify a material needed for the job (e.g., "MOT Type 1 Sub-base", "Cement", "Pipe" or "Sink") but you **cannot** find a specific product for it in the provided data, you MUST still include it in the material list as a single item (not with options). For these items, set the 'name' to describe the material and add "(to be quoted)" at the end.
       5.  Generate a JSON object with the following exact structure.
           {
             "materials": [
