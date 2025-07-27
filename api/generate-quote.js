@@ -60,11 +60,8 @@ function fallbackKeywordExtractor(description) {
 }
 
 async function searchWordPressProducts(keywords) {
-  // Combine all keywords into a single search query string.
   const searchQuery = keywords.join(' ');
-  if (!searchQuery) {
-    return [];
-  }
+  if (!searchQuery) return [];
 
   const url = `https://attradeprice.co.uk/wp-json/atp/v1/search-products?q=${encodeURIComponent(searchQuery)}`;
   console.log(`--- WP API FETCH: Attempting to fetch URL: ${url} ---`);
@@ -73,7 +70,6 @@ async function searchWordPressProducts(keywords) {
     const response = await fetch(url);
     if (!response.ok) {
       console.error(`Failed to fetch from WP API (${searchQuery}): ${response.statusText}`);
-      // Return empty array on failure so the process can continue.
       return [];
     }
     const products = await response.json();
@@ -98,8 +94,6 @@ function filterByNaturalStonePreference(products, jobDescription) {
 
 export default async function handler(req, res) {
   console.log("--- EXECUTING CODE VERSION: JULY 27 @ 6:05 PM ---");
-  
-console.log("RAW AI RESPONSE:\n", aiText);
 
   if (req.method !== 'POST') {
     res.setHeader('Allow', ['POST']);
@@ -152,23 +146,27 @@ console.log("RAW AI RESPONSE:\n", aiText);
              "considerations": [...]
            }
          }
-    8. Respond ONLY with a valid JSON object matching the format above. Do not include any commentary, explanations, or markdown — just return the raw JSON data.
-
+      8. Respond ONLY with a valid JSON object matching the format above. Do not include any commentary, explanations, or markdown — just return the raw JSON data.
     `;
 
     const result = await model.generateContent(prompt);
     const aiText = result.response.text();
+
+    console.log("RAW AI RESPONSE:\n", aiText); // Log the AI response for debugging
+
     let jsonText;
-try {
-  jsonText = aiText.match(/\{[\s\S]*\}/)?.[0]; // matches the first JSON block
-  if (!jsonText) throw new Error("No JSON found in AI response.");
-  const parsed = JSON.parse(jsonText);
-  return res.status(200).json(parsed);
-} catch (err) {
-  console.error("Failed to parse AI JSON:", err.message, "\nAI Response:", aiText);
-  return res.status(500).json({ error: "Failed to parse AI response as valid JSON.", rawResponse: aiText });
-}
-    return res.status(200).json(parsed);
+    try {
+      jsonText = aiText.match(/\{[\s\S]*\}/)?.[0]; // Extract first JSON block
+      if (!jsonText) throw new Error("No JSON found in AI response.");
+      const parsed = JSON.parse(jsonText);
+      return res.status(200).json(parsed);
+    } catch (err) {
+      console.error("Failed to parse AI JSON:", err.message, "\nAI Response:", aiText);
+      return res.status(500).json({
+        error: "Failed to parse AI response as valid JSON.",
+        rawResponse: aiText
+      });
+    }
 
   } catch (error) {
     console.error("Error in serverless function:", error);
