@@ -5,25 +5,33 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
  * customer’s job description.  It now performs two AI calls: one to
  * extract relevant search keywords from the job description, and a
  * second to generate the final quote based on the resulting product
- * catalogue.
+ * catalogue.  It also filters out concrete slabs when the job
+ * specifically calls for natural stone.
  */
 
-// Fallback stopwords: words we never want to use as search terms.
+// Stopwords to ignore when extracting keywords.
 const stopWords = new Set([
   'a','an','the','in','on','for','with','i','want','to','build','and','is',
   'it','will','be','area','size','using','out','of','which','currently',
   'grass','metres','meter','long','high'
 ]);
 
-// Fallback synonyms for common construction terms.
-// These are used only if the AI keyword extraction fails.
+/*
+ * Fallback synonyms used only if the AI fails to extract any keywords.
+ * You can expand these lists as needed.  These help the system fall
+ * back gracefully when the keyword extraction step returns nothing.
+ */
 const fallbackSynonyms = {
   paving:    ['paving','slabs'],
-  stone:     ['stone','sandstone','limestone','slate','granite','travertine','quartzite','basalt'],
+  // Natural stone includes many types
+  stone:     ['stone','sandstone','limestone','slate','granite','travertine','quartzite','basalt','yorkstone','porphyry'],
   patio:     ['patio','paving'],
   aggregate: ['aggregate','sand','cement','mot'],
   brick:     ['brick','block','red brick'],
   block:     ['block','concrete block'],
+  // Mortar and jointing compounds
+  mortar:    ['mortar','jointing','joint','jointing compound','pointing compound','slurry','primer','adhesive','bonding'],
+  cement:    ['cement','postcrete'],
 };
 
 /**
@@ -104,13 +112,33 @@ async function searchWordPressProducts(keywords) {
         continue;
       }
       const products = await response.json();
-      console.log(`--- WP API FETCH: ${kw} returned`, products.length, 'products');
       products.forEach(p => resultsMap.set(p.url, p));
     } catch (error) {
       console.error(`Error fetching keyword '${kw}':`, error.message);
     }
   }
   return Array.from(resultsMap.values());
+}
+
+/**
+ * Filter out concrete or utility slabs if the job specifically mentions
+ * “natural stone”.  This prevents “pressed concrete” products from
+ * appearing in the natural stone options.
+ *
+ * @param {Object[]} products Product array from WordPress.
+ * @param {string} jobDescription The customer's description.
+ * @returns {Object[]} Filtered product list.
+ */
+function filterByNaturalStonePreference(products, jobDescription) {
+  const prefersNatural = /natural\s+stone/i.test(jobDescription);
+  if (!prefersNatural) return products;
+  const naturalStoneTerms = ['sandstone','limestone','slate','granite','travertine','yorkstone','porphyry','stone'];
+  return products.filter(p => {
+    const text = (p.title + ' ' + p.description).toLowerCase();
+    const isNatural   = naturalStoneTerms.some(term => text.includes(term));
+    const isConcrete  = /concrete|utility|pressed/.test(text);
+    return isNatural && !isConcrete;
+  });
 }
 
 export default async function handler(req, res) {
@@ -140,10 +168,14 @@ export default async function handler(req, res) {
     }
 
     // Step 2: Use those keywords to search the WordPress API.
-    const searchResults = await searchWordPressProducts(keywords);
+    let searchResults = await searchWordPressProducts(keywords);
+
+    // Step 3: Optionally filter out concrete slabs if natural stone is requested.
+    searchResults = filterByNaturalStonePreference(searchResults, jobDescription);
+
     console.log(`--- AI INPUT: Product catalog for AI:`, searchResults);
 
-    // Step 3: Ask the model to produce the final materials list and method based on the catalogue.
+    // Step 4: Ask the model to produce the final materials list and method based on the catalogue.
     const prompt = `
       You are an expert quantity surveyor for a UK-based building materials supplier called "At Trade Price".
       Your task is to analyze a customer's job description and a provided list of relevant products fetched directly from the attradeprice.co.uk website's product catalog.
@@ -157,8 +189,8 @@ export default async function handler(req, res) {
       **Instructions & Rules:**
       1.  **Analyze the provided "Product Catalog" list.** This is the ONLY source of available products. Use both the 'title' and the 'description' to understand what each product is.
       2.  Based on the job description, calculate the required quantity for each necessary material. Assume a 10% waste factor for materials like paving and aggregates.
-      3.  **CRITICAL:** If you find multiple suitable products for a single material requirement (e.g., different colors of "pointing compound" or different types of "natural stone"), you MUST include them as an array of 'options'. **You MUST use the exact product titles from the provided data for the 'name' in each option.**
-      4.  If you identify a material needed for the job (e.g., "MOT Type 1 Sub-base", "Cement", "Pipe" or "Sink") but you **cannot** find a specific product for it in the provided data, you MUST still include it in the material list as a single item (not with options). For these items, set the 'name' to describe the material and add "(to be quoted)" at the end.
+      3.  **CRITICAL:** If you find multiple suitable products for a single material requirement (e.g., different colours of "pointing compound" or different types of "natural stone"), you MUST include them as an array of 'options'. **You MUST use the exact product titles from the provided data for the 'name' in each option.**
+      4.  If you identify a material needed for the job (e.g., "MOT Type 1 Sub-base", "Cement", "Pipe", "Sink", "Pointing Compound", "Slurry Primer") but you **cannot** find a specific product for it in the provided data, you MUST still include it in the material list as a single item (not with options). For these items, set the 'name' to describe the material and add "(to be quoted)" at the end.
       5.  Generate a JSON object with the following exact structure.
           {
             "materials": [
