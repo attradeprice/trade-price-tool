@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import React, { useState } from 'react';
 
 // Stopwords to ignore when extracting keywords.
 const stopWords = new Set([
@@ -63,12 +64,18 @@ async function searchWordPressProducts(keywords) {
   for (const kw of keywords) {
     if (!kw) continue;
     const url = `https://attradeprice.co.uk/wp-json/atp/v1/search-products?q=${encodeURIComponent(kw)}`;
+    console.log(`--- WP API FETCH: Attempting to fetch URL: ${url} ---`);
     try {
       const response = await fetch(url);
-      if (!response.ok) continue;
+      if (!response.ok) {
+        console.error(`Failed to fetch from WP API (${kw}): ${response.statusText}`);
+        continue;
+      }
       const products = await response.json();
       products.forEach(p => resultsMap.set(p.url, p));
-    } catch {}
+    } catch (error) {
+      console.error(`Error fetching keyword '${kw}':`, error.message);
+    }
   }
   return Array.from(resultsMap.values());
 }
@@ -79,8 +86,8 @@ function filterByNaturalStonePreference(products, jobDescription) {
   const naturalStoneTerms = ['sandstone','limestone','slate','granite','travertine','yorkstone','porphyry','stone'];
   return products.filter(p => {
     const text = (p.title + ' ' + p.description).toLowerCase();
-    const isNatural = naturalStoneTerms.some(term => text.includes(term));
-    const isConcrete = /concrete|utility|pressed/.test(text);
+    const isNatural   = naturalStoneTerms.some(term => text.includes(term));
+    const isConcrete  = /concrete|utility|pressed/.test(text);
     return isNatural && !isConcrete;
   });
 }
@@ -110,6 +117,8 @@ export default async function handler(req, res) {
     let searchResults = await searchWordPressProducts(keywords);
     searchResults = filterByNaturalStonePreference(searchResults, jobDescription);
 
+    console.log(`--- AI INPUT: Product catalog for AI:`, searchResults);
+
     const prompt = `
       You are an expert quantity surveyor for a UK-based building materials supplier called "At Trade Price".
       Your task is to analyze a customer's job description and a provided list of relevant products fetched directly from the attradeprice.co.uk website's product catalog.
@@ -138,12 +147,12 @@ export default async function handler(req, res) {
       8. Respond with the raw JSON only. No markdown, text, or formatting.
     `;
 
-    const result = await model.generateContent(prompt);
-    const aiText = result.response.text();
+    const result    = await model.generateContent(prompt);
+    const aiText    = result.response.text();
     const jsonStart = aiText.indexOf('{');
-    const jsonEnd = aiText.lastIndexOf('}');
+    const jsonEnd   = aiText.lastIndexOf('}');
     if (jsonStart === -1 || jsonEnd === -1) throw new Error("AI did not return a valid JSON object.");
-    const parsed = JSON.parse( aiText.slice(jsonStart, jsonEnd + 1) );
+    const parsed    = JSON.parse( aiText.slice(jsonStart, jsonEnd + 1) );
     return res.status(200).json(parsed);
 
   } catch (error) {

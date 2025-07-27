@@ -1,5 +1,3 @@
-import React, { useState } from 'react';
-
 function ProductDropdown({ options, value, onChange }) {
   const [open, setOpen] = useState(false);
   const selected = options.find(opt => opt.name === value) || options[0];
