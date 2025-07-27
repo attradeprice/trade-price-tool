@@ -98,6 +98,9 @@ function filterByNaturalStonePreference(products, jobDescription) {
 }
 
 export default async function handler(req, res) {
+  // Diagnostic log to confirm which version of the code is running
+  console.log("--- EXECUTING CODE VERSION: JULY 27 @ 6:05 PM ---");
+
   if (req.method !== 'POST') {
     res.setHeader('Allow', ['POST']);
     return res.status(405).end(`Method ${req.method} Not Allowed`);
