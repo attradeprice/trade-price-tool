@@ -1,100 +1,54 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import React, { useState } from 'react';
 
-// Stopwords to ignore when extracting keywords.
-const stopWords = new Set([
-  'a', 'an', 'the', 'in', 'on', 'for', 'with', 'i', 'want', 'to', 'build', 'and', 'is',
-  'it', 'will', 'be', 'area', 'size', 'using', 'out', 'of', 'which', 'currently',
-  'grass', 'metres', 'meter', 'long', 'high'
-]);
+// Helper function to extract keywords from a job description
+function extractKeywords(description) {
+    const lowerDesc = description.toLowerCase();
+    const stopWords = new Set(['a', 'an', 'the', 'in', 'on', 'for', 'with', 'i', 'want', 'to', 'build', 'and', 'is', 'it', 'will', 'be', 'area', 'size', 'using', 'out', 'of']);
+    
+    const keywords = lowerDesc
+        .replace(/[^\w\s]/g, '') // remove punctuation
+        .split(/\s+/)
+        .filter(word => !stopWords.has(word) && word.length > 2);
+        
+    // Add some common synonyms and related terms to improve search
+    const synonyms = {
+        'paving': 'paving slabs',
+        'stone': 'stone slate sandstone limestone',
+        'patio': 'patio paving',
+        'aggregate': 'aggregate sand cement mot'
+    };
 
-// Fallback synonyms used only if the AI fails to extract any keywords.
-const fallbackSynonyms = {
-  paving: ['paving', 'slabs'],
-  stone: ['stone', 'sandstone', 'limestone', 'slate', 'granite', 'travertine', 'quartzite', 'basalt', 'yorkstone', 'porphyry'],
-  patio: ['patio', 'paving'],
-  aggregate: ['aggregate', 'sand', 'cement', 'mot'],
-  brick: ['brick', 'block', 'red brick'],
-  block: ['block', 'concrete block'],
-  mortar: ['mortar', 'jointing', 'joint', 'jointing compound', 'pointing compound', 'slurry', 'primer', 'adhesive', 'bonding', 'bonding agent'],
-  cement: ['cement', 'postcrete'],
-  adhesive: ['adhesive', 'primer', 'slurry primer', 'sbr', 'pva', 'bonding agent', 'tile adhesive']
-};
+    let expandedKeywords = [...keywords];
+    keywords.forEach(kw => {
+        if (synonyms[kw]) {
+            expandedKeywords.push(synonyms[kw]);
+        }
+    });
 
-async function getSearchKeywords(description, model) {
-  const extractionPrompt = `
-    Identify all distinct material, product, consumable or accessory keywords
-    that could be relevant when searching a building materials catalogue for
-    the following project description. Include not only primary materials
-    (e.g. "stone", "cement") but also ancillary items such as primers, bonding
-    slurry, jointing compound, fixings, adhesives, pipes, taps, etc. Only
-    list nouns and material types (no measurements, no verbs, no job steps).
-    Return them as a comma-separated list without any additional text.
-
-    Job description: "${description}"
-  `;
-  try {
-    const result = await model.generateContent(extractionPrompt);
-    const text = result.response.text().trim();
-    let keywords = text.split(/[;,]/).map(k => k.trim().toLowerCase()).filter(Boolean);
-    keywords = keywords.filter(w => !stopWords.has(w) && !/^\d+(x\d+)?$/.test(w));
-    return Array.from(new Set(keywords));
-  } catch (err) {
-    console.error('Keyword extraction failed:', err.message);
-    return [];
-  }
+    return [...new Set(expandedKeywords)].join(' ');
 }
 
-function fallbackKeywordExtractor(description) {
-  const words = description.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/);
-  const keywords = new Set();
-  for (const w of words) {
-    if (w && !stopWords.has(w) && !/^\d+(x\d+)?$/.test(w) && w.length > 2) {
-      keywords.add(w);
-      if (fallbackSynonyms[w]) {
-        fallbackSynonyms[w].forEach(syn => keywords.add(syn));
-      }
+// NEW: Helper function to call your WordPress search API
+async function searchWordPressProducts(query) {
+    const searchUrl = `https://attradeprice.co.uk/wp-json/atp/v1/search-products?q=${encodeURIComponent(query)}`;
+    try {
+        console.log(`--- WP API FETCH: Attempting to fetch URL: ${searchUrl} ---`);
+        const response = await fetch(searchUrl);
+        if (!response.ok) {
+            console.error(`Failed to fetch from WP API: ${response.statusText}`);
+            return [];
+        }
+        const products = await response.json();
+        console.log(`--- WP API FETCH: Products received from WordPress API:`, products);
+        return products;
+    } catch (error) {
+        console.error("Error calling WordPress API:", error);
+        return [];
     }
-  }
-  return Array.from(keywords);
 }
 
-async function searchWordPressProducts(keywords) {
-  const searchQuery = keywords.join(' ');
-  if (!searchQuery) return [];
-
-  const url = `https://attradeprice.co.uk/wp-json/atp/v1/search-products?q=${encodeURIComponent(searchQuery)}`;
-  console.log(`--- WP API FETCH: Attempting to fetch URL: ${url} ---`);
-
-  try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      console.error(`Failed to fetch from WP API (${searchQuery}): ${response.statusText}`);
-      return [];
-    }
-    const products = await response.json();
-    return products;
-  } catch (error) {
-    console.error(`Error fetching keywords '${searchQuery}':`, error.message);
-    return [];
-  }
-}
-
-function filterByNaturalStonePreference(products, jobDescription) {
-  const prefersNatural = /natural\s+stone/i.test(jobDescription);
-  if (!prefersNatural) return products;
-  const naturalStoneTerms = ['sandstone', 'limestone', 'slate', 'granite', 'travertine', 'yorkstone', 'porphyry', 'stone'];
-  return products.filter(p => {
-    const text = (p.name + ' ' + p.description).toLowerCase();
-    const isNatural = naturalStoneTerms.some(term => text.includes(term));
-    const isConcrete = /concrete|utility|pressed/.test(text);
-    return isNatural && !isConcrete;
-  });
-}
 
 export default async function handler(req, res) {
-  console.log("--- EXECUTING CODE VERSION: JULY 27 @ 6:05 PM ---");
-
   if (req.method !== 'POST') {
     res.setHeader('Allow', ['POST']);
     return res.status(405).end(`Method ${req.method} Not Allowed`);
@@ -102,24 +56,24 @@ export default async function handler(req, res) {
 
   try {
     const { jobDescription } = req.body;
+
     if (!jobDescription) {
       return res.status(400).json({ error: 'Missing jobDescription in request body' });
     }
 
-    const apiKey = process.env.VITE_GOOGLE_API_KEY;
-    if (!apiKey) throw new Error("API key not found.");
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    // --- New WordPress API Logic ---
+    const keywords = extractKeywords(jobDescription);
+    const searchResults = await searchWordPressProducts(keywords);
+    console.log(`--- AI INPUT: Product catalog for AI:`, searchResults);
 
-    let keywords = await getSearchKeywords(jobDescription, model);
-    if (!keywords || keywords.length === 0) {
-      keywords = fallbackKeywordExtractor(jobDescription);
+
+    const apiKey = process.env.VITE_GOOGLE_API_KEY;
+    if (!apiKey) {
+      throw new Error("API key not found.");
     }
 
-    let searchResults = await searchWordPressProducts(keywords);
-    searchResults = filterByNaturalStonePreference(searchResults, jobDescription);
-
-    console.log(`--- AI INPUT: Product catalog for AI:`, searchResults);
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
     const prompt = `
       You are an expert quantity surveyor for a UK-based building materials supplier called "At Trade Price".
@@ -132,44 +86,54 @@ export default async function handler(req, res) {
       ${JSON.stringify(searchResults, null, 2)}
 
       **Instructions & Rules:**
-      1. Analyze the provided "Product Catalog" list. The 'id' field is the product's unique URL and the 'name' field is the product title.
-      2. Based on the job description, calculate the required quantity for each necessary material.
-      3. Include ancillary materials such as primers, membranes, fixings, PPE, etc. If a suitable product is not in the catalog list for an ancillary item, mark its quantity as "(to be quoted)".
-      4. When creating the 'options' array for a material, strip any size, color, or pack information from the product 'name' to create a generic option name (e.g., "Kandla Grey Sandstone Paving" becomes "Sandstone Paving").
-      5. For multiple product matches for a single material type (e.g., several types of sandstone), group them and return them as an array of product options in the 'options' field. Each option object must have an 'id' (the product URL) and a 'name' (the full product name from the catalog).
-      6. Include a detailed construction method with excavation, sub-base, bedding, priming, laying, jointing, drainage, and curing steps.
-      7. Return the JSON object with this exact format:
-         {
-           "materials": [...],
-           "method": {
-             "steps": [...],
-             "considerations": [...]
-           }
-         }
-      8. Respond ONLY with a valid JSON object matching the format above. Do not include any commentary, explanations, or markdown — just return the raw JSON data.
+      1.  **Analyze the provided "Product Catalog" list.** This is the ONLY source of available products. Use both the 'title' and the 'description' to understand what each product is.
+      2.  Based on the job description, calculate the required quantity for each necessary material. Assume a 10% waste factor for materials like paving and aggregates.
+      3.  **CRITICAL:** If you find multiple suitable products for a single material requirement (e.g., different colors of "pointing compound" or different types of "natural stone"), you MUST include them as an array of 'options'. **You MUST use the exact product titles from the provided data for the 'name' in each option.**
+      4.  If you identify a material needed for the job (e.g., "MOT Type 1 Sub-base", "Cement") but you **cannot** find a specific product for it in the provided data, you MUST still include it in the material list as a single item (not with options). For these items, set the 'name' to describe the material and add "(to be quoted)" at the end.
+      5.  Generate a JSON object with the following exact structure.
+          {
+            "materials": [
+              { 
+                "id": "<unique_id_for_material_group>", 
+                "name": "<Generic Name like 'Pointing Compound' or 'Natural Stone Paving'>", 
+                "quantity": <calculated_quantity>, 
+                "unit": "<standard_unit>",
+                "options": [
+                    { "id": "<product_url_1>", "name": "<EXACT Product Name from Data 1>" },
+                    { "id": "<product_url_2>", "name": "<EXACT Product Name from Data 2>" }
+                ]
+              },
+              ...
+            ],
+            "method": {
+              "steps": ["<step_1>", "<step_2>", ...],
+              "considerations": ["<consideration_1>", "<consideration_2>", ...]
+            }
+          }
+      6.  Your entire response MUST be only the raw JSON object. Do not include any extra text, explanations, or markdown formatting. The response must start with { and end with }.
     `;
 
     const result = await model.generateContent(prompt);
-    const aiText = result.response.text();
+    const response = await result.response;
+    let aiResponseText = response.text();
 
-    console.log("RAW AI RESPONSE:\n", aiText); // Log the AI response for debugging
+    console.log("--- AI RAW RESPONSE ---");
+    console.log(aiResponseText);
+    console.log("--- END AI RAW RESPONSE ---");
 
-    let jsonText;
-    try {
-      jsonText = aiText.match(/\{[\s\S]*\}/)?.[0]; // Extract first JSON block
-      if (!jsonText) throw new Error("No JSON found in AI response.");
-      const parsed = JSON.parse(jsonText);
-      return res.status(200).json(parsed);
-    } catch (err) {
-      console.error("Failed to parse AI JSON:", err.message, "\nAI Response:", aiText);
-      return res.status(500).json({
-        error: "Failed to parse AI response as valid JSON.",
-        rawResponse: aiText
-      });
+    const jsonStart = aiResponseText.indexOf('{');
+    const jsonEnd = aiResponseText.lastIndexOf('}');
+    if (jsonStart === -1 || jsonEnd === -1) {
+      throw new Error("AI did not return a valid JSON object.");
     }
+    aiResponseText = aiResponseText.substring(jsonStart, jsonEnd + 1);
+
+    const parsedJsonResponse = JSON.parse(aiResponseText);
+
+    res.status(200).json(parsedJsonResponse);
 
   } catch (error) {
     console.error("Error in serverless function:", error);
-    return res.status(500).json({ error: "An internal server error occurred.", details: error.message });
+    res.status(500).json({ error: "An internal server error occurred.", details: error.message });
   }
 }
