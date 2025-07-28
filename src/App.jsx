@@ -38,7 +38,7 @@ const Input = ({ label, value, onChange, placeholder, name }) => (
     </div>
 );
 
-// --- NEW: Product Dropdown Component ---
+// --- Product Dropdown Component ---
 function ProductDropdown({ options, value, onChange }) {
   const [open, setOpen] = useState(false);
   const selected = options.find(opt => opt.name === value) || options[0];
