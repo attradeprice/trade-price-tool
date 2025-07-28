@@ -9,7 +9,8 @@ import QuoteOutput from './QuoteOutput';
 export default function App() {
   const [jobDescription, setJobDescription] = useState('');
   const [selectedTier, setSelectedTier] = useState(1);
-  const [quote, setQuote] = useState(null);
+const [quote, setQuote] = useState(null);
+const [selectedMaterials, setSelectedMaterials] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [companyDetails, setCompanyDetails] = useState({ name: '', address: '' });
   const [customerDetails, setCustomerDetails] = useState({ name: '', address: '' });
@@ -30,9 +31,15 @@ export default function App() {
   useEffect(() => {
     if (quote) {
       localStorage.setItem('atp_last_quote', JSON.stringify(quote));
-      if (quote.customerQuote?.quoteNumber) {
-        localStorage.setItem(`quote_${quote.customerQuote.quoteNumber}`, JSON.stringify(quote));
-      }
+     if (quote.customerQuote?.quoteNumber) {
+  localStorage.setItem(
+    `quote_${quote.customerQuote.quoteNumber}`,
+    JSON.stringify({
+      ...quote,
+      selectedMaterials,
+    })
+  );
+}
     }
   }, [quote]);
 
@@ -103,7 +110,7 @@ export default function App() {
 
         <GenerateButton loading={isLoading} onClick={handleGenerateQuote} />
 
-        <QuoteOutput quote={quote} onAddToCart={handleAddToCart} />
+        <QuoteOutput quote={quote} setQuote={setQuote} onAddToCart={handleAddToCart} />
       </div>
     </div>
   );

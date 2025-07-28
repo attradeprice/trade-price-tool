@@ -5,7 +5,7 @@ import QuoteTable from './QuoteTable';
 import ConstructionMethod from './ConstructionMethod';
 import CustomerQuote from './CustomerQuote';
 
-export default function QuoteOutput({ quote, onAddToCart, setQuote }) {
+export default function QuoteOutput({ quote, setQuote, onAddToCart }) {
   const printRef = useRef();
   const [savedQuotes, setSavedQuotes] = useState([]);
   const [selectedQuoteKey, setSelectedQuoteKey] = useState('');
@@ -96,11 +96,26 @@ export default function QuoteOutput({ quote, onAddToCart, setQuote }) {
       <div ref={printRef} className="space-y-10">
         <section>
           <h3 className="text-xl font-semibold text-gray-700 mb-4">Tier 1: Materials</h3>
-          <QuoteTable
-            materials={quote.materials}
-            totalCost={totalMaterialsCost}
-            onAddToCart={onAddToCart}
-          />
+        <QuoteTable
+  materials={quote.materials}
+  totalCost={totalMaterialsCost}
+  onAddToCart={(id, selectedName) => {
+    const updated = {
+      ...(quote.selectedMaterials || {}),
+      [id]: selectedName,
+    };
+
+    const updatedQuote = {
+      ...quote,
+      selectedMaterials: updated,
+    };
+
+    // Update quote with selected option
+    setQuote(updatedQuote);
+    onAddToCart(id, selectedName);
+  }}
+/>
+
         </section>
 
         {quote.method && (

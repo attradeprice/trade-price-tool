@@ -1,50 +1,65 @@
-import React from 'react';
+import React, { useState } from 'react';
 import ProductDropdown from './ProductDropdown';
 
 export default function QuoteTable({ materials = [], totalCost, onAddToCart }) {
+  const [selections, setSelections] = useState({});
+
+  const handleSelect = (id, name) => {
+    const updated = { ...selections, [id]: name };
+    setSelections(updated);
+  };
+
+  const handleAdd = (id) => {
+    if (selections[id]) onAddToCart(id, selections[id]);
+  };
+
   return (
-    <div className="overflow-x-auto border rounded-lg">
-      <table className="min-w-full text-sm text-gray-800">
-        <thead className="bg-gray-100 text-gray-700 uppercase text-xs font-semibold">
-          <tr>
-            <th className="text-left px-4 py-3">Material</th>
-            <th className="text-center px-4 py-3">Qty</th>
-            <th className="text-center px-4 py-3">Unit</th>
-            <th className="text-right px-4 py-3">Action</th>
+    <table className="w-full text-sm border">
+      <thead className="bg-gray-100 text-gray-700">
+        <tr>
+          <th className="text-left p-2">Material</th>
+          <th className="text-center p-2">Qty</th>
+          <th className="text-center p-2">Unit</th>
+          <th className="text-center p-2">Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {materials.map((item) => (
+          <tr key={item.id} className="border-b">
+            <td className="p-2 align-top">
+              {item.options?.length ? (
+                <ProductDropdown
+                  options={item.options}
+                  value={selections[item.id] || item.options[0]?.name}
+                  onChange={(val) => handleSelect(item.id, val)}
+                />
+              ) : (
+                item.name
+              )}
+            </td>
+            <td className="text-center p-2 align-top">{item.quantity}</td>
+            <td className="text-center p-2 align-top">{item.unit}</td>
+            <td className="text-center p-2 align-top">
+              {item.options?.length ? (
+                <button
+                  onClick={() => handleAdd(item.id)}
+                  className="text-xs px-3 py-1 bg-[#275262] text-white rounded hover:opacity-90"
+                >
+                  Add to Cart
+                </button>
+              ) : (
+                <span className="text-gray-400 text-xs">(to be quoted)</span>
+              )}
+            </td>
           </tr>
-        </thead>
-        <tbody>
-          {materials.map((item) => (
-            <tr key={item.id} className="border-b hover:bg-gray-50">
-              <td className="px-4 py-2">
-                <div className="font-medium">
-                  {item.name}
-                </div>
-                {item.options?.length > 0 && (
-                  <ProductDropdown
-                    options={item.options}
-                    value={item.options[0]?.name}
-                    onChange={(val) => onAddToCart(item.id, val)}
-                  />
-                )}
-              </td>
-              <td className="px-4 py-2 text-center">{item.quantity}</td>
-              <td className="px-4 py-2 text-center">{item.unit}</td>
-              <td className="px-4 py-2 text-right">
-                {item.options?.length === 0 && (
-                  <span className="text-gray-400 italic">To be quoted</span>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-        <tfoot>
-          <tr className="bg-gray-100 font-semibold">
-            <td colSpan="3" className="text-right px-4 py-3">Subtotal</td>
-            <td className="text-right px-4 py-3 text-brand">£{totalCost.toFixed(2)}</td>
-          </tr>
-        </tfoot>
-      </table>
-    </div>
+        ))}
+        <tr className="bg-gray-50 font-semibold">
+          <td colSpan="3" className="p-2 text-right">
+            Subtotal
+          </td>
+          <td className="p-2 text-right">£{(totalCost || 0).toFixed(2)}</td>
+        </tr>
+      </tbody>
+    </table>
   );
 }
