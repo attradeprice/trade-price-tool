@@ -38,6 +38,57 @@ const Input = ({ label, value, onChange, placeholder, name }) => (
     </div>
 );
 
+// --- NEW: Product Dropdown Component ---
+function ProductDropdown({ options, value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const selected = options.find(opt => opt.name === value) || options[0];
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="w-full p-2 border rounded flex items-center justify-between bg-white text-left"
+      >
+        <div className="flex items-center">
+            {selected.image && (
+              <img
+                src={selected.image}
+                alt={selected.name}
+                className="w-8 h-8 mr-2 object-cover rounded"
+              />
+            )}
+            <span>{selected.name}</span>
+        </div>
+        <ChevronDown size={20} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <ul className="absolute z-10 mt-1 w-full bg-white border rounded shadow-lg max-h-60 overflow-auto">
+          {options.map(opt => (
+            <li
+              key={opt.id}
+              onClick={() => {
+                onChange(opt.name);
+                setOpen(false);
+              }}
+              className="p-2 hover:bg-gray-100 cursor-pointer flex items-center"
+            >
+              {opt.image && (
+                <img
+                  src={opt.image}
+                  alt={opt.name}
+                  className="w-8 h-8 mr-2 object-cover rounded"
+                />
+              )}
+              <span>{opt.name}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 
 // --- Core Components ---
 
@@ -240,15 +291,11 @@ const QuoteOutput = ({ quote, tier, materialPrices, setMaterialPrices, companyDe
                     {item.options && item.options.length > 0 ? (
                         <div className="flex flex-col gap-1">
                             <span className="font-bold">{item.name}</span>
-                            <select
+                            <ProductDropdown
+                                options={item.options}
                                 value={userSelections[item.id] || item.options[0].name}
-                                onChange={(e) => handleSelectionChange(item.id, e.target.value)}
-                                className="w-full p-2 border border-gray-300 rounded-md focus:ring-brand focus:border-brand"
-                            >
-                                {item.options.map(option => (
-                                    <option key={option.id} value={option.name}>{option.name}</option>
-                                ))}
-                            </select>
+                                onChange={(selectedValue) => handleSelectionChange(item.id, selectedValue)}
+                            />
                         </div>
                     ) : (
                         item.name
