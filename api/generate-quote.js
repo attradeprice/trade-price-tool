@@ -15,10 +15,11 @@ const extractKeywords = (text) => {
     .filter((w) => !stopWords.has(w) && w.length > 2);
 
   const synonyms = {
-    patio: 'paving stone slab flags',
-    fencing: 'fence panel post timber',
-    cement: 'paving cement mortar joint filler',
-    aggregate: 'sand gravel ballast mot subbase sub-base',
+    patio: 'paving stone slab flags patio',
+    fencing: 'fence panel post timber gravelboard',
+    cement: 'cement mortar joint filler bonding',
+    aggregate: 'sand gravel ballast mot subbase sub-base hardcore',
+    wall: 'bricks blocks render pier footing coping',
   };
 
   const expanded = new Set(words);
@@ -38,12 +39,12 @@ const cleanTitle = (title) =>
 const groupProducts = (results) => {
   const groups = {};
   results.forEach((p) => {
-    const baseName = cleanTitle(p.title.rendered || '');
+    const baseName = cleanTitle(p.name);
     if (!groups[baseName]) groups[baseName] = [];
     groups[baseName].push({
-      id: p.link,
-      name: cleanTitle(p.title.rendered || ''),
-      image: p.images?.[0] || null,
+      id: p.id,
+      name: p.name,
+      image: p.image || null,
     });
   });
   return groups;
@@ -107,18 +108,10 @@ Respond with only:
 
     const json = JSON.parse(raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
 
-    // Add dropdown options with fallback
+    // Attach dropdown options
     json.materials.forEach((item) => {
-      const match = grouped[item.name] || [];
-      item.options = match.length
-        ? match
-        : [
-            {
-              id: `manual-${item.name}`,
-              name: item.name,
-              image: null,
-            },
-          ];
+      const match = grouped[item.name];
+      if (match) item.options = match;
     });
 
     res.status(200).json(json);
