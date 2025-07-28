@@ -1,5 +1,3 @@
-
-// /api/generate-quote.js
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const stopWords = new Set([
@@ -51,6 +49,27 @@ const groupProducts = (results) => {
   return groups;
 };
 
+const getClosestMatch = (targetName, grouped) => {
+  let bestMatch = null;
+  let highestScore = 0;
+
+  const normalize = (str) => str.toLowerCase().replace(/[^\w\s]/g, '').trim();
+  const wordsA = new Set(normalize(targetName).split(/\s+/));
+
+  for (const [key, products] of Object.entries(grouped)) {
+    const wordsB = new Set(normalize(key).split(/\s+/));
+    const intersection = [...wordsA].filter(word => wordsB.has(word));
+    const score = intersection.length / Math.max(wordsA.size, wordsB.size);
+
+    if (score > highestScore && score > 0.4) {
+      bestMatch = products;
+      highestScore = score;
+    }
+  }
+
+  return bestMatch;
+};
+
 const searchWordPressProducts = async (query) => {
   const url = `https://attradeprice.co.uk/wp-json/atp/v1/search-products?q=${encodeURIComponent(query)}`;
   const res = await fetch(url);
@@ -75,15 +94,9 @@ export default async function handler(req, res) {
       .join('\n');
 
     const prompt = `
-You're an expert British quantity surveyor. Based on the user's project description, use the material catalogue to produce a construction quote in JSON format.
+You are an expert British quantity surveyor. Based on the job description, use the material catalogue to produce a construction quote in JSON format. Always include key materials such as paving, MOT sub-base, bedding sand, edging, and joint filler for outdoor patios.
 
-User Job Description:
-"${jobDescription}"
-
-Available Materials (include variants in dropdowns):
-${descriptions}
-
-Respond strictly as:
+Respond strictly in this format:
 {
   materials: [
     {
@@ -101,6 +114,12 @@ Respond strictly as:
     considerations: [ string ]
   }
 }
+
+User Job Description:
+"${jobDescription}"
+
+Available Materials:
+${descriptions}
 `;
 
     const genAI = new GoogleGenerativeAI(process.env.VITE_GOOGLE_API_KEY);
@@ -108,12 +127,21 @@ Respond strictly as:
     const result = await model.generateContent(prompt);
     const raw = result.response.text();
 
+    if (!raw.includes('{') || !raw.includes('materials')) {
+      throw new Error('Gemini returned an incomplete response');
+    }
+
     const json = JSON.parse(raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
 
     json.materials.forEach((item) => {
-      const match = grouped[item.name];
-      if (match) item.options = match;
+      const match = getClosestMatch(item.name, grouped);
+      item.options = match || [];
     });
+
+    // Optional: debug logs
+    console.log('🟡 Extracted keywords:', keywords);
+    console.log('🟢 Grouped products:', Object.keys(grouped));
+    console.log('🔵 Gemini response:', raw);
 
     res.status(200).json(json);
   } catch (err) {
