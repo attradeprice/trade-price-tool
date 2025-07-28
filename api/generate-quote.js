@@ -1,3 +1,4 @@
+
 // /api/generate-quote.js
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
@@ -15,11 +16,10 @@ const extractKeywords = (text) => {
     .filter((w) => !stopWords.has(w) && w.length > 2);
 
   const synonyms = {
-    patio: 'paving stone slab flags patio',
-    fencing: 'fence panel post timber gravelboard',
-    cement: 'cement mortar joint filler bonding',
-    aggregate: 'sand gravel ballast mot subbase sub-base hardcore',
-    wall: 'bricks blocks render pier footing coping',
+    patio: 'paving stone slab flags',
+    fencing: 'fence panel post timber',
+    cement: 'paving cement mortar joint filler',
+    aggregate: 'sand gravel ballast mot subbase sub-base',
   };
 
   const expanded = new Set(words);
@@ -32,19 +32,20 @@ const extractKeywords = (text) => {
 
 const cleanTitle = (title) =>
   title
-    .replace(/\s?[\d.]+(m|mm|kg|m²|sqm|inch|")/gi, '') // remove dimensions
-    .replace(/(\s+-\s+.*|\(.*\))/, '') // remove brackets & suffixes
+    .replace(/\s?[\d.]+(m|mm|kg|m²|sqm|inch|")/gi, '')
+    .replace(/(\s+-\s+.*|\(.*\))/, '')
     .trim();
 
 const groupProducts = (results) => {
   const groups = {};
   results.forEach((p) => {
-    const baseName = cleanTitle(p.name);
+    const baseName = cleanTitle(p.name || p.title?.rendered || '');
     if (!groups[baseName]) groups[baseName] = [];
     groups[baseName].push({
       id: p.id,
       name: p.name,
       image: p.image || null,
+      description: p.description || '',
     });
   });
   return groups;
@@ -68,35 +69,36 @@ export default async function handler(req, res) {
     const searchResults = await searchWordPressProducts(keywords);
     const grouped = groupProducts(searchResults);
 
-    const prompt = `
-You're an expert quantity surveyor. Based on the user's project description, use the product groups below to create a detailed construction material quote in JSON format.
+    const descriptions = Object.values(grouped)
+      .flat()
+      .map(p => `${p.name} - ${p.description}`)
+      .join('\n');
 
-User's Job Description:
+    const prompt = `
+You're an expert British quantity surveyor. Based on the user's project description, use the material catalogue to produce a construction quote in JSON format.
+
+User Job Description:
 "${jobDescription}"
 
-Available Material Groups:
-${JSON.stringify(Object.keys(grouped), null, 2)}
+Available Materials (include variants in dropdowns):
+${descriptions}
 
-Rules:
-- Pick materials needed to complete the project properly.
-- Group variants (like different types of paving) together under one item.
-- Add generic items (e.g. MOT Type 1 Sub-base, cement, sand, fixings) even if not found in search.
-- Use only these fields:
-  - id: unique string
-  - name: material group name
-  - quantity: estimated number
-  - unit: m², m, each, etc.
-  - options: dropdown options for user, based on the group
-
-- Output also a "method" object with "steps" and "considerations".
-- No explanation or extra text.
-
-Respond with only:
+Respond strictly as:
 {
-  materials: [...],
+  materials: [
+    {
+      id: string,
+      name: string,
+      quantity: number,
+      unit: string,
+      options: [
+        { id: string, name: string, image: string, description: string }
+      ]
+    }
+  ],
   method: {
-    steps: [...],
-    considerations: [...]
+    steps: [ string ],
+    considerations: [ string ]
   }
 }
 `;
@@ -108,7 +110,6 @@ Respond with only:
 
     const json = JSON.parse(raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
 
-    // Attach dropdown options
     json.materials.forEach((item) => {
       const match = grouped[item.name];
       if (match) item.options = match;
