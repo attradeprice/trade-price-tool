@@ -1,7 +1,6 @@
-// /api/generate-quote.js
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-function extractKeywords(description) {
+const extractKeywords = (description) => {
   const stopWords = new Set([
     'a', 'an', 'the', 'in', 'on', 'for', 'with', 'i', 'want', 'to', 'build', 'and', 'is',
     'it', 'will', 'be', 'area', 'size', 'using', 'out', 'of', 'which', 'currently',
@@ -29,14 +28,14 @@ function extractKeywords(description) {
   });
 
   return Array.from(expanded).join(' ');
-}
+};
 
-async function searchWordPressProducts(query) {
+const searchWordPressProducts = async (query) => {
   const url = `https://attradeprice.co.uk/wp-json/atp/v1/search-products?q=${encodeURIComponent(query)}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`WordPress search failed`);
   return res.json();
-}
+};
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end('Method Not Allowed');

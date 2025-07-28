@@ -1,59 +1,49 @@
-// src/QuoteTable.jsx
 import React from 'react';
+import ProductDropdown from './ProductDropdown';
 
-export default function QuoteTable({ materials, onAddToCart }) {
-  const handleSelectionChange = (materialId, selectedOptionId) => {
-    onAddToCart(materialId, selectedOptionId);
-  };
-
+export default function QuoteTable({ materials = [], totalCost, onAddToCart }) {
   return (
-    <div className="mt-8">
-      <h2 className="text-xl font-semibold mb-4">Your Generated Plan</h2>
-      <table className="w-full border rounded overflow-hidden text-sm">
-        <thead className="bg-gray-100 text-left">
+    <div className="overflow-x-auto border rounded-lg">
+      <table className="min-w-full text-sm text-gray-800">
+        <thead className="bg-gray-100 text-gray-700 uppercase text-xs font-semibold">
           <tr>
-            <th className="p-2">Product</th>
-            <th className="p-2">Quantity</th>
-            <th className="p-2">Unit Price (£)</th>
-            <th className="p-2">Total Price (£)</th>
+            <th className="text-left px-4 py-3">Material</th>
+            <th className="text-center px-4 py-3">Qty</th>
+            <th className="text-center px-4 py-3">Unit</th>
+            <th className="text-right px-4 py-3">Action</th>
           </tr>
         </thead>
         <tbody>
           {materials.map((item) => (
-            <tr key={item.id} className="border-t">
-              <td className="p-2">
-                {item.options?.length > 1 ? (
-                  <select
-                    className="w-full border rounded px-2 py-1"
-                    onChange={(e) => handleSelectionChange(item.id, e.target.value)}
-                  >
-                    <option disabled selected>
-                      Select an option
-                    </option>
-                    {item.options.map((option) => (
-                      <option key={option.id} value={option.id}>
-                        {option.name}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  item.name
+            <tr key={item.id} className="border-b hover:bg-gray-50">
+              <td className="px-4 py-2">
+                <div className="font-medium">
+                  {item.name}
+                </div>
+                {item.options?.length > 0 && (
+                  <ProductDropdown
+                    options={item.options}
+                    value={item.options[0]?.name}
+                    onChange={(val) => onAddToCart(item.id, val)}
+                  />
                 )}
               </td>
-              <td className="p-2">{item.quantity} {item.unit}</td>
-              <td className="p-2">
-                <input
-                  type="number"
-                  step="0.01"
-                  placeholder="0.00"
-                  className="w-20 px-2 py-1 border rounded"
-                  onChange={(e) => handleSelectionChange(item.id, e.target.value)}
-                />
+              <td className="px-4 py-2 text-center">{item.quantity}</td>
+              <td className="px-4 py-2 text-center">{item.unit}</td>
+              <td className="px-4 py-2 text-right">
+                {item.options?.length === 0 && (
+                  <span className="text-gray-400 italic">To be quoted</span>
+                )}
               </td>
-              <td className="p-2">0.00</td>
             </tr>
           ))}
         </tbody>
+        <tfoot>
+          <tr className="bg-gray-100 font-semibold">
+            <td colSpan="3" className="text-right px-4 py-3">Subtotal</td>
+            <td className="text-right px-4 py-3 text-brand">£{totalCost.toFixed(2)}</td>
+          </tr>
+        </tfoot>
       </table>
     </div>
   );
