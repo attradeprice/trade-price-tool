@@ -9,8 +9,8 @@ import QuoteOutput from './QuoteOutput';
 export default function App() {
   const [jobDescription, setJobDescription] = useState('');
   const [selectedTier, setSelectedTier] = useState(1);
-const [quote, setQuote] = useState(null);
-const [selectedMaterials, setSelectedMaterials] = useState({});
+  const [quote, setQuote] = useState(null);
+  const [selectedMaterials, setSelectedMaterials] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [companyDetails, setCompanyDetails] = useState({ name: '', address: '' });
   const [customerDetails, setCustomerDetails] = useState({ name: '', address: '' });
@@ -31,17 +31,17 @@ const [selectedMaterials, setSelectedMaterials] = useState({});
   useEffect(() => {
     if (quote) {
       localStorage.setItem('atp_last_quote', JSON.stringify(quote));
-     if (quote.customerQuote?.quoteNumber) {
-  localStorage.setItem(
-    `quote_${quote.customerQuote.quoteNumber}`,
-    JSON.stringify({
-      ...quote,
-      selectedMaterials,
-    })
-  );
-}
+      if (quote.customerQuote?.quoteNumber) {
+        localStorage.setItem(
+          `quote_${quote.customerQuote.quoteNumber}`,
+          JSON.stringify({
+            ...quote,
+            selectedMaterials,
+          })
+        );
+      }
     }
-  }, [quote]);
+  }, [quote, selectedMaterials]);
 
   const handleGenerateQuote = async () => {
     setIsLoading(true);
@@ -75,7 +75,19 @@ const [selectedMaterials, setSelectedMaterials] = useState({});
   };
 
   const handleAddToCart = (materialId, selected) => {
-    console.log(`Selected material ${materialId}: ${selected}`);
+    const updated = {
+      ...selectedMaterials,
+      [materialId]: selected,
+    };
+    setSelectedMaterials(updated);
+
+    if (quote) {
+      const updatedQuote = {
+        ...quote,
+        selectedMaterials: updated,
+      };
+      setQuote(updatedQuote);
+    }
   };
 
   return (
@@ -110,7 +122,11 @@ const [selectedMaterials, setSelectedMaterials] = useState({});
 
         <GenerateButton loading={isLoading} onClick={handleGenerateQuote} />
 
-        <QuoteOutput quote={quote} setQuote={setQuote} onAddToCart={handleAddToCart} />
+        <QuoteOutput
+          quote={quote}
+          setQuote={setQuote}
+          onAddToCart={handleAddToCart}
+        />
       </div>
     </div>
   );
