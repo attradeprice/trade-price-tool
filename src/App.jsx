@@ -49,7 +49,7 @@ export default function App() {
       const result = await response.json();
 
       const customerQuote = {
-        quoteNumber: `Q-${new Date().toISOString().slice(0,19).replace(/[-:T]/g,'')}`,
+        quoteNumber: `Q-${Date.now()}`,
         date: new Date().toLocaleDateString('en-GB'),
         projectDescription: jobDescription,
         materialsCost: 0,
@@ -72,16 +72,16 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 p-6 font-sans">
+    <div className="min-h-screen bg-gray-50 p-6 font-sans text-[#275262]">
       <div className="max-w-4xl mx-auto space-y-6">
-        <header className="text-center">
+        <header className="text-center border-b border-gray-200 pb-4">
           <img
-            src="https://attradeprice.co.uk/wp-content/uploads/2023/04/logo-dark.png"
-            alt="At Trade Price"
-            className="h-16 mx-auto mb-4"
+            src="/logo-atp.png"
+            alt="At Trade Price Logo"
+            className="h-16 mx-auto mb-2"
           />
-          <h1 className="text-4xl font-bold text-gray-800">AI Material & Quote Generator</h1>
-          <p className="text-sm text-gray-500">Built to British Building Standards</p>
+          <h1 className="text-3xl font-bold text-[#275262]">AI Material & Quote Generator</h1>
+          <p className="text-sm text-gray-600">Built to British Building Standards</p>
         </header>
 
         <JobInput jobDescription={jobDescription} setJobDescription={setJobDescription} />
