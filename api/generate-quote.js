@@ -6,19 +6,20 @@ const stopWords = new Set([
   'grass', 'metres', 'meter', 'long', 'high', 'by', 'from'
 ]);
 
+const synonyms = {
+  patio: 'paving stone slab flags patio',
+  fencing: 'fence panel post timber gravelboard',
+  cement: 'cement mortar joint filler bonding',
+  aggregate: 'sand gravel ballast mot subbase sub-base hardcore',
+  wall: 'bricks blocks render pier footing coping',
+};
+
 const extractKeywords = (text) => {
   const words = text
     .toLowerCase()
     .replace(/[^\w\s]/g, '')
     .split(/\s+/)
     .filter((w) => !stopWords.has(w) && w.length > 2);
-
-  const synonyms = {
-    patio: 'paving stone slab flags',
-    fencing: 'fence panel post timber',
-    cement: 'paving cement mortar joint filler',
-    aggregate: 'sand gravel ballast mot subbase sub-base',
-  };
 
   const expanded = new Set(words);
   words.forEach((w) => {
@@ -40,9 +41,9 @@ const groupProducts = (results) => {
     const baseName = cleanTitle(p.name || p.title?.rendered || '');
     if (!groups[baseName]) groups[baseName] = [];
     groups[baseName].push({
-      id: p.id,
-      name: p.name,
-      image: p.image || null,
+      id: p.id || p.link,
+      name: p.name || cleanTitle(p.title?.rendered || ''),
+      image: p.image || p.images?.[0] || null,
       description: p.description || '',
     });
   });
@@ -61,7 +62,7 @@ const getClosestMatch = (targetName, grouped) => {
     const intersection = [...wordsA].filter(word => wordsB.has(word));
     const score = intersection.length / Math.max(wordsA.size, wordsB.size);
 
-    if (score > highestScore && score > 0.4) {
+    if (score > highestScore && score > 0.3) {  // Adjust threshold here if needed
       bestMatch = products;
       highestScore = score;
     }
@@ -94,7 +95,7 @@ export default async function handler(req, res) {
       .join('\n');
 
     const prompt = `
-You are an expert British quantity surveyor. Based on the job description, use the material catalogue to produce a construction quote in JSON format. Always include key materials such as paving, MOT sub-base, bedding sand, edging, and joint filler for outdoor patios.
+You are an expert British quantity surveyor. Based on the job description, use the material catalogue to produce a construction quote in JSON format. Always include common items like paving, MOT Type 1, sharp sand, edging, and joint filler when building patios.
 
 Respond strictly in this format:
 {
@@ -128,20 +129,27 @@ ${descriptions}
     const raw = result.response.text();
 
     if (!raw.includes('{') || !raw.includes('materials')) {
-      throw new Error('Gemini returned an incomplete response');
+      throw new Error('Gemini returned an incomplete or malformed response.');
     }
 
     const json = JSON.parse(raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
 
     json.materials.forEach((item) => {
       const match = getClosestMatch(item.name, grouped);
-      item.options = match || [];
+      if (match && match.length) {
+        item.options = match;
+      } else {
+        // Provide at least one fallback option so dropdown still shows
+        item.options = [
+          {
+            id: `manual-${item.name}`,
+            name: item.name,
+            image: null,
+            description: '',
+          },
+        ];
+      }
     });
-
-    // Optional: debug logs
-    console.log('🟡 Extracted keywords:', keywords);
-    console.log('🟢 Grouped products:', Object.keys(grouped));
-    console.log('🔵 Gemini response:', raw);
 
     res.status(200).json(json);
   } catch (err) {
