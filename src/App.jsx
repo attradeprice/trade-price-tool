@@ -49,7 +49,7 @@ export default function App() {
       const result = await response.json();
 
       const customerQuote = {
-        quoteNumber: `Q-${Math.floor(1000 + Math.random() * 9000)}`,
+        quoteNumber: `Q-${new Date().toISOString().slice(0,19).replace(/[-:T]/g,'')}`,
         date: new Date().toLocaleDateString('en-GB'),
         projectDescription: jobDescription,
         materialsCost: 0,
