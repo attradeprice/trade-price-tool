@@ -1,7 +1,8 @@
+// src/ProductDropdown.jsx
 import React, { useState, useEffect } from 'react';
 
-export default function ProductDropdown({ options = [], value, onChange }) {
-  const [selected, setSelected] = useState(value || '');
+export default function ProductDropdown({ options = [], value = '', onChange }) {
+  const [selected, setSelected] = useState(value);
 
   useEffect(() => {
     setSelected(value);
@@ -26,16 +27,18 @@ export default function ProductDropdown({ options = [], value, onChange }) {
         ))}
       </select>
 
-      {/* Thumbnail image selector */}
       <div className="flex flex-wrap gap-3 mt-2">
         {options.map((opt, i) => (
           <div
             key={i}
             onClick={() => handleChange(opt.name)}
-            className={`cursor-pointer border rounded w-20 h-20 overflow-hidden transition-all ${
-              opt.name === selected ? 'ring-2 ring-[#275262]' : 'hover:ring-1 hover:ring-[#275262]/50'
+            className={`cursor-pointer border rounded w-20 h-20 overflow-hidden transition-all flex items-center justify-center ${
+              opt.name === selected
+                ? 'ring-2 ring-[#275262] bg-gray-50'
+                : 'hover:ring-1 hover:ring-[#275262]/40'
             }`}
             title={opt.name}
+            aria-label={opt.name}
           >
             {opt.image ? (
               <img
@@ -44,7 +47,7 @@ export default function ProductDropdown({ options = [], value, onChange }) {
                 className="w-full h-full object-cover"
               />
             ) : (
-              <div className="flex items-center justify-center h-full text-xs text-gray-500 bg-gray-100">
+              <div className="text-[10px] text-gray-500 text-center px-1">
                 No image
               </div>
             )}

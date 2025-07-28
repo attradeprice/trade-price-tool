@@ -38,11 +38,11 @@ const cleanTitle = (title) =>
 const groupProducts = (results) => {
   const groups = {};
   results.forEach((p) => {
-    const baseName = cleanTitle(p.title.rendered);
+    const baseName = cleanTitle(p.title.rendered || '');
     if (!groups[baseName]) groups[baseName] = [];
     groups[baseName].push({
       id: p.link,
-      name: p.title.rendered,
+      name: cleanTitle(p.title.rendered || ''),
       image: p.images?.[0] || null,
     });
   });
@@ -107,10 +107,18 @@ Respond with only:
 
     const json = JSON.parse(raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
 
-    // Attach dropdown options
+    // Add dropdown options with fallback
     json.materials.forEach((item) => {
-      const match = grouped[item.name];
-      if (match) item.options = match;
+      const match = grouped[item.name] || [];
+      item.options = match.length
+        ? match
+        : [
+            {
+              id: `manual-${item.name}`,
+              name: item.name,
+              image: null,
+            },
+          ];
     });
 
     res.status(200).json(json);
