@@ -16,9 +16,9 @@ export default function App() {
   const [logo, setLogo] = useState(null);
 
   useEffect(() => {
-    const saved = localStorage.getItem('atp_last_quote');
-    if (saved) setQuote(JSON.parse(saved));
-
+    // We are removing the loading of the last quote on page load
+    // to prevent the empty table from showing.
+    // A fresh quote will be generated each time.
     const savedCompany = localStorage.getItem('companyDetails');
     const savedCustomer = localStorage.getItem('customerDetails');
     const savedVat = localStorage.getItem('vatRate');
@@ -26,11 +26,6 @@ export default function App() {
     if (savedCompany) setCompanyDetails(JSON.parse(savedCompany));
     if (savedCustomer) setCustomerDetails(JSON.parse(savedCustomer));
     if (savedVat) setVatRate(Number(savedVat));
-
-    const qParam = new URLSearchParams(window.location.search).get('quote');
-    if (qParam && localStorage.getItem(`quote_${qParam}`)) {
-      setQuote(JSON.parse(localStorage.getItem(`quote_${qParam}`)));
-    }
   }, []);
 
   useEffect(() => {
@@ -56,7 +51,7 @@ export default function App() {
 
   const handleGenerateQuote = async () => {
     setIsLoading(true);
-    setQuote(null);
+    setQuote(null); // Clear previous quote
     try {
       const response = await fetch('/api/generate-quote', {
         method: 'POST',
@@ -64,16 +59,17 @@ export default function App() {
         body: JSON.stringify({ jobDescription }),
       });
 
+      if (!response.ok) {
+        throw new Error(`API request failed with status ${response.status}`);
+      }
+      
       const result = await response.json();
 
       const customerQuote = {
+        ...result.customerQuote, // Spread the fields from the AI response
         quoteNumber: `Q-${Date.now()}`,
         date: new Date().toLocaleDateString('en-GB'),
         projectDescription: jobDescription,
-        projectSummary: result.method?.summary || '',
-        labourHours: 0,
-        hourlyRate: 25,
-        vatRate: vatRate / 100,
         company: companyDetails,
         customer: customerDetails,
         logo: logo || null,
@@ -81,7 +77,7 @@ export default function App() {
 
       setQuote({ ...result, customerQuote });
     } catch (error) {
-      alert('Failed to generate quote.');
+      alert('Failed to generate quote. Please check the console for details.');
       console.error(error);
     } finally {
       setIsLoading(false);
@@ -132,12 +128,15 @@ export default function App() {
 
         <GenerateButton loading={isLoading} onClick={handleGenerateQuote} />
 
-        <QuoteOutput
-          quote={quote}
-          setQuote={setQuote}
-          selectedTier={selectedTier}
-          onAddToCart={handleAddToCart}
-        />
+        {/* [!important] Only render the output if a quote exists */}
+        {quote && (
+          <QuoteOutput
+            quote={quote}
+            setQuote={setQuote}
+            selectedTier={selectedTier}
+            onAddToCart={handleAddToCart}
+          />
+        )}
       </div>
     </div>
   );
