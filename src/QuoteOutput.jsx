@@ -5,7 +5,7 @@ import QuoteTable from './QuoteTable';
 import ConstructionMethod from './ConstructionMethod';
 import CustomerQuote from './CustomerQuote';
 
-export default function QuoteOutput({ quote, setQuote, onAddToCart }) {
+export default function QuoteOutput({ quote, setQuote, onAddToCart, selectedTier = 1 }) {
   const printRef = useRef();
   const [savedQuotes, setSavedQuotes] = useState([]);
   const [selectedQuoteKey, setSelectedQuoteKey] = useState('');
@@ -94,38 +94,38 @@ export default function QuoteOutput({ quote, setQuote, onAddToCart }) {
       </div>
 
       <div ref={printRef} className="space-y-10">
-        <section>
-          <h3 className="text-xl font-semibold text-gray-700 mb-4">Tier 1: Materials</h3>
-        <QuoteTable
-  materials={quote.materials}
-  totalCost={totalMaterialsCost}
-  onAddToCart={(id, selectedName) => {
-    const updated = {
-      ...(quote.selectedMaterials || {}),
-      [id]: selectedName,
-    };
+        {selectedTier >= 1 && (
+          <section>
+            <h3 className="text-xl font-semibold text-gray-700 mb-4">Tier 1: Materials</h3>
+            <QuoteTable
+              materials={quote.materials}
+              totalCost={totalMaterialsCost}
+              onAddToCart={(id, selectedName) => {
+                const updated = {
+                  ...(quote.selectedMaterials || {}),
+                  [id]: selectedName,
+                };
 
-    const updatedQuote = {
-      ...quote,
-      selectedMaterials: updated,
-    };
+                const updatedQuote = {
+                  ...quote,
+                  selectedMaterials: updated,
+                };
 
-    // Update quote with selected option
-    setQuote(updatedQuote);
-    onAddToCart(id, selectedName);
-  }}
-/>
+                setQuote(updatedQuote);
+                onAddToCart(id, selectedName);
+              }}
+            />
+          </section>
+        )}
 
-        </section>
-
-        {quote.method && (
+        {selectedTier >= 2 && quote.method && (
           <section>
             <h3 className="text-xl font-semibold text-gray-700 mb-4">Tier 2: Method & Considerations</h3>
             <ConstructionMethod method={quote.method} />
           </section>
         )}
 
-        {quote.customerQuote && (
+        {selectedTier === 3 && quote.customerQuote && (
           <section>
             <h3 className="text-xl font-semibold text-gray-700 mb-4">Tier 3: Final Quote Summary</h3>
             <CustomerQuote

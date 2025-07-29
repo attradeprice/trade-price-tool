@@ -1,50 +1,55 @@
+// src/CustomerQuote.jsx
 import React from 'react';
 
 export default function CustomerQuote({ customerQuote, totalMaterialsCost }) {
   if (!customerQuote) return null;
 
-  const {
-    quoteNumber,
-    date,
-    projectDescription,
-    labourCost = 0,
-    vat = 0,
-    total = 0,
-  } = customerQuote;
+  const labourHours = customerQuote.labourHours || 0;
+  const hourlyRate = customerQuote.hourlyRate || 25;
+  const labourCost = labourHours * hourlyRate;
+  const subtotal = totalMaterialsCost + labourCost;
+  const vatAmount = subtotal * (customerQuote.vatRate || 0.2);
+  const total = subtotal + vatAmount;
 
   return (
-    <div className="bg-white border rounded-lg p-6 shadow">
-      <div className="mb-4">
-        <h4 className="text-lg font-bold text-gray-800">Quote Summary</h4>
-        <p className="text-sm text-gray-600">Quote #: {quoteNumber} — Date: {date}</p>
+    <div className="space-y-6 text-sm text-gray-800">
+      <div>
+        <strong>Quote Number:</strong> {customerQuote.quoteNumber}<br />
+        <strong>Date:</strong> {customerQuote.date}
       </div>
 
-      <p className="text-gray-700 mb-4"><strong>Description:</strong> {projectDescription}</p>
+      <div>
+        <strong>Project Summary:</strong>
+        <p className="mt-1 text-gray-700 whitespace-pre-line">
+          {customerQuote.projectSummary || 'This quote outlines the work to be carried out based on your description.'}
+        </p>
+      </div>
 
-      <table className="w-full text-sm border rounded overflow-hidden">
-        <tbody>
-          <tr className="border-t">
-            <td className="p-2">Materials</td>
-            <td className="p-2 text-right">£{totalMaterialsCost.toFixed(2)}</td>
-          </tr>
-          <tr className="border-t">
-            <td className="p-2">Estimated Labour</td>
-            <td className="p-2 text-right">£{labourCost.toFixed(2)}</td>
-          </tr>
-          <tr className="border-t">
-            <td className="p-2">VAT</td>
-            <td className="p-2 text-right">£{vat.toFixed(2)}</td>
-          </tr>
-          <tr className="bg-gray-100 font-bold border-t">
-            <td className="p-2">Total</td>
-            <td className="p-2 text-right text-brand">£{total.toFixed(2)}</td>
-          </tr>
-        </tbody>
-      </table>
+      <div>
+        <strong>Estimated Labour:</strong>
+        <p className="mt-1 text-gray-700">
+          {labourHours} hours @ £{hourlyRate}/hr = £{labourCost.toFixed(2)}
+        </p>
+      </div>
 
-      <p className="text-xs text-gray-500 mt-4">
-        This quote is valid for 30 days. Labour costs are estimated. Product pricing is subject to merchant verification.
-      </p>
+      <div className="border-t pt-4">
+        <div className="flex justify-between">
+          <span>Materials Total:</span>
+          <span>£{totalMaterialsCost.toFixed(2)}</span>
+        </div>
+        <div className="flex justify-between">
+          <span>Labour Cost:</span>
+          <span>£{labourCost.toFixed(2)}</span>
+        </div>
+        <div className="flex justify-between">
+          <span>VAT ({(customerQuote.vatRate * 100).toFixed(0)}%):</span>
+          <span>£{vatAmount.toFixed(2)}</span>
+        </div>
+        <div className="flex justify-between font-semibold border-t pt-2 mt-2">
+          <span>Total (inc. VAT):</span>
+          <span>£{total.toFixed(2)}</span>
+        </div>
+      </div>
     </div>
   );
 }
