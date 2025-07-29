@@ -53,6 +53,17 @@ export default function QuoteOutput({ quote, setQuote, onAddToCart, selectedTier
     }
   };
 
+  const handleSendToCart = () => {
+    const url = new URL('https://attradeprice.co.uk/quote-cart');
+    quote.materials.forEach((item, index) => {
+      const selected = quote.selectedMaterials?.[item.name];
+      const productName = selected?.name || item.name;
+      url.searchParams.append(`item_${index + 1}_name`, encodeURIComponent(productName));
+      url.searchParams.append(`item_${index + 1}_qty`, item.quantity);
+    });
+    window.location.href = url.toString();
+  };
+
   if (!quote) return null;
 
   return (
@@ -65,6 +76,13 @@ export default function QuoteOutput({ quote, setQuote, onAddToCart, selectedTier
             className="bg-[#275262] hover:bg-[#1e3d4f] text-white px-4 py-2 rounded"
           >
             Download PDF
+          </button>
+
+          <button
+            onClick={handleSendToCart}
+            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded"
+          >
+            Add to WooCommerce Cart
           </button>
 
           {savedQuotes.length > 0 && (
