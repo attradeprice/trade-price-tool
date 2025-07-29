@@ -1,49 +1,55 @@
 // src/ProductDropdown.jsx
-import React, { useEffect, useState } from 'react';
-import Select from 'react-select';
+import React, { useState, useEffect } from 'react';
 
-const ProductDropdown = ({ selectedProduct, onSelect }) => {
-  const [productOptions, setProductOptions] = useState([]);
+const PLACEHOLDER_IMAGE = '/placeholder-image.png'; // ensure this file exists in public/
+
+export default function ProductDropdown({ options = [], value = '', onChange }) {
+  const [selected, setSelected] = useState(value);
 
   useEffect(() => {
-    const fetchProducts = async () => {
-      try {
-        const res = await fetch('https://attradeprice.co.uk/wp-json/atp/v1/search-products');
-        const data = await res.json();
-        const options = data.map((product) => ({
-          value: product.name,
-          label: (
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              <img
-                src={product.image}
-                alt={product.name}
-                style={{ width: 30, height: 30, marginRight: 10, objectFit: 'cover' }}
-              />
-              <span>{product.name}</span>
-            </div>
-          ),
-          raw: product,
-        }));
-        setProductOptions(options);
-      } catch (err) {
-        console.error('Failed to fetch products:', err);
-      }
-    };
+    setSelected(value);
+  }, [value]);
 
-    fetchProducts();
-  }, []);
+  const handleChange = (newVal) => {
+    setSelected(newVal);
+    onChange(newVal);
+  };
 
   return (
-    <div className="my-2">
-      <label className="block text-sm font-medium text-gray-700">Select Product:</label>
-      <Select
-        options={productOptions}
-        onChange={(selected) => onSelect(selected?.raw)}
-        placeholder="Choose a product..."
-        isSearchable
-      />
+    <div className="w-full space-y-2">
+      <select
+        className="w-full border text-sm rounded p-2 shadow-sm bg-white text-gray-800 focus:ring-2 focus:ring-[#275262]"
+        value={selected}
+        onChange={(e) => handleChange(e.target.value)}
+      >
+        {options.map((opt, i) => (
+          <option key={i} value={opt.name}>
+            {opt.name}
+          </option>
+        ))}
+      </select>
+
+      <div className="flex flex-wrap gap-3 mt-2">
+        {options.map((opt, i) => (
+          <div
+            key={i}
+            onClick={() => handleChange(opt.name)}
+            className={`cursor-pointer border rounded w-20 h-20 overflow-hidden transition-all flex items-center justify-center ${
+              opt.name === selected
+                ? 'ring-2 ring-[#275262] bg-gray-50'
+                : 'hover:ring-1 hover:ring-[#275262]/40'
+            }`}
+            title={opt.name}
+            aria-label={opt.name}
+          >
+            <img
+              src={opt.image || PLACEHOLDER_IMAGE}
+              alt={opt.name}
+              className="w-full h-full object-cover"
+            />
+          </div>
+        ))}
+      </div>
     </div>
   );
-};
-
-export default ProductDropdown;
+}
