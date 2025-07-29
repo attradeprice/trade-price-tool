@@ -53,7 +53,7 @@ const extractKeywords = (text) => {
 const cleanTitle = (title) =>
   title
     .replace(/\s?[\d.]+(m|mm|kg|m²|sqm|inch|")/gi, '') // Remove measurements
-    .replace(/(\s+-\s+.*|\(.*\))/, '') // Remove text in parentheses or after a hyphen
+    .replace(/(\s+–\s+.*|\(.*\))/gi, '') // [!important] Improved to better handle SKUs
     .trim();
 
 /**
