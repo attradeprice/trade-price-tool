@@ -1,18 +1,20 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import stringSimilarity from 'string-similarity';
 
-// ——— Helper: strip sizes, “pack of”, parentheses, etc. ————————————
+// ——— Helpers —————————————————————————————————————————————
+
+// Strip sizes, “pack of”, parentheses, etc.
 const cleanTitle = (title = '') =>
   title
     .replace(
       /(pack of\s*\d+|\d+\s?(x|×)\s?\d+\s?(mm|cm|m)?|\d+(mm|cm|m|kg|ltr|sqm|m²)|bulk|single|each)/gi,
       ''
     )
-    .replace(/\(.*?\)/g, '')   // parentheses
-    .replace(/[-–|•]+.*/g, '') // after dash/bullet
+    .replace(/\(.*?\)/g, '')   // remove anything in parentheses
+    .replace(/[-–|•]+.*/g, '') // drop trailing text after dash/bullet
     .trim();
 
-// ——— Fetch from your WP endpoint ——————————————————————————————
+// Call your WP REST endpoint
 async function searchWordPressProducts(query) {
   const url = `https://attradeprice.co.uk/wp-json/atp/v1/search-products?q=${encodeURIComponent(
     query
@@ -30,32 +32,25 @@ async function searchWordPressProducts(query) {
   }
 }
 
-// ——— AI: What kind of project? ————————————————————————————————
+// ——— AI routines ——————————————————————————————————————————
+
 async function getProjectType(desc, genAI) {
   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-  const prompt = `Identify in a few words the primary trade or construction task for: "${desc}".`;
+  const prompt = `Identify in a few words the primary trade or project type for: "${desc}".`;
   const result = await model.generateContent(prompt);
   return result.response.text().trim();
 }
 
-// ——— AI: Build the plan + materials ——————————————————————————————
 async function generateExpertPlan(desc, projectType, genAI) {
   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
   const prompt = `
 You are an expert in ${projectType}.
-Based on: "${desc}", output **only** a JSON object:
-
+Based on this project: "${desc}"
+Return **only** a JSON object with:
 {
-  "materials": [
-    { "name":"string", "quantity":number, "unit":"string" }
-  ],
-  "method": {
-    "steps":[ "string" ],
-    "considerations":[ "string" ]
-  },
-  "customerQuote": {
-    "labourHours": number
-  }
+  "materials": [ { "name":"string", "quantity":number, "unit":"string" } ],
+  "method":   { "steps":[ "string" ], "considerations":[ "string" ] },
+  "customerQuote": { "labourHours": number }
 }
 `;
   const result = await model.generateContent(prompt);
@@ -65,6 +60,7 @@ Based on: "${desc}", output **only** a JSON object:
 }
 
 // ——— Main handler ——————————————————————————————————————————
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' });
@@ -81,17 +77,11 @@ export default async function handler(req, res) {
     // 1) Identify project type
     const projectType = await getProjectType(jobDescription, genAI);
 
-    // 2) Generate materials, method & labour
-    const plan = await generateExpertPlan(
-      jobDescription,
-      projectType,
-      genAI
-    );
+    // 2) Generate materials + plan
+    const plan = await generateExpertPlan(jobDescription, projectType, genAI);
 
-    // 3) Safe defaults
-    const materialsList = Array.isArray(plan.materials)
-      ? plan.materials
-      : [];
+    // 3) Safely pull out arrays/objects
+    const materialsList = Array.isArray(plan.materials) ? plan.materials : [];
     const method =
       plan.method && typeof plan.method === 'object'
         ? plan.method
@@ -103,35 +93,45 @@ export default async function handler(req, res) {
     const labourHours = Number(cq.labourHours) || 0;
     const labourRate = Number(cq.labourRate) || 35;
 
-    // 4) For each material fetch ALL matching products
+    // 4) Build materials with ALL relevant products fuzzy-filtered
     const finalMaterials = [];
+
     for (const mat of materialsList) {
       const materialName = (mat.name || mat.item || '').trim();
       if (!materialName) continue;
 
-      // clean off sizes/packages
-      const queryTerm = cleanTitle(materialName);
+      // a) Clean off sizes/packs
+      const baseQuery = cleanTitle(materialName);
 
-      // fetch
-      let products = await searchWordPressProducts(queryTerm);
+      // b) Primary search
+      let products = await searchWordPressProducts(baseQuery);
 
-      // filter out irrelevant “colour” dyes etc.
-      products = products.filter(
-        (p) => !/colour\b/i.test(p.name)
-      );
+      // c) If nothing, split on words (length>3) and union
+      if (!products.length) {
+        const words = baseQuery.split(/\s+/).filter(w => w.length > 3);
+        const all = [];
+        for (const w of words) {
+          const p = await searchWordPressProducts(w);
+          all.push(...p);
+        }
+        // dedupe by ID
+        products = Array.from(new Map(all.map(p => [p.id, p])).values());
+      }
 
-      // fallback if nothing
+      // d) Filter out “colour” dyes etc.
+      products = products.filter(p => !/colour\b/i.test(p.name));
+
+      // e) If STILL none -> manual fallback
       if (!products.length) {
         finalMaterials.push({
           ...mat,
           name: materialName,
           options: [
             {
-              id: `manual-${queryTerm.replace(/\s+/g, '-')}`,
+              id: `manual-${baseQuery.replace(/\s+/g, '-')}`,
               name: materialName,
               image: null,
-              description:
-                '❌ Not found — please manually price this item.',
+              description: '❌ Not found – please manually price this item.',
               link: null,
             },
           ],
@@ -139,36 +139,47 @@ export default async function handler(req, res) {
         continue;
       }
 
-      // fuzzy-sort ALL matches by similarity to queryTerm
-      const cleanedMat = queryTerm.toLowerCase();
-      const targets = products.map((p) =>
-        cleanTitle(p.name).toLowerCase()
-      );
-      const { ratings } = stringSimilarity.findBestMatch(
-        cleanedMat,
-        targets
-      );
+      // f) Fuzzy-score ALL returned products
+      const cleanedMat = baseQuery.toLowerCase();
+      const targets = products.map(p => cleanTitle(p.name).toLowerCase());
+      const { ratings } = stringSimilarity.findBestMatch(cleanedMat, targets);
 
-      const sorted = ratings
-        .map((r) => ({
-          rating: r.rating,
+      const scored = ratings
+        .map(r => ({
+          score: r.rating,
           product: products.find(
-            (p) =>
-              cleanTitle(p.name).toLowerCase() === r.target
+            p => cleanTitle(p.name).toLowerCase() === r.target
           ),
         }))
-        .filter((e) => e.product)
-        .sort((a, b) => b.rating - a.rating)
-        .map((e) => e.product);
+        .filter(e => e.product)
+        .sort((a, b) => b.score - a.score);
 
-      // map ALL sorted products to dropdown options
-      const options = sorted.map((p) => ({
-        id: p.id,
-        name: cleanTitle(p.name),
-        image: p.image,
-        description: p.description,
-        link: `https://attradeprice.co.uk/?p=${p.id}`,
-      }));
+      // g) Filter out any with very low relevance (<0.3)
+      const relevant = scored
+        .filter(e => e.score >= 0.3)
+        .map(e => e.product);
+
+      // if none pass threshold, use them all
+      const finalList = relevant.length ? relevant : scored.map(e => e.product);
+
+      // h) Build dropdown options, always starting with the original material
+      const placeholder = {
+        id: `manual-${baseQuery.replace(/\s+/g, '-')}`,
+        name: materialName,
+        image: null,
+        description: 'Select matching product…',
+        link: null,
+      };
+      const options = [
+        placeholder,
+        ...finalList.map(p => ({
+          id: p.id,
+          name: cleanTitle(p.name),
+          image: p.image,
+          description: p.description,
+          link: `https://attradeprice.co.uk/?p=${p.id}`,
+        })),
+      ];
 
       finalMaterials.push({
         ...mat,
@@ -177,7 +188,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // 5) Assemble the quote
+    // 5) Compose and return the quote
     const quote = {
       materials: finalMaterials,
       method,
