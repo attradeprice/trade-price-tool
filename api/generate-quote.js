@@ -12,8 +12,8 @@ const cleanTitle = (title = '') =>
       /(pack of\s*\d+|\d+\s?(x|×)\s?\d+\s?(mm|cm|m)?|\d+(mm|cm|m|kg|ltr|sqm|m²)|bulk|single|each)/gi,
       ''
     )
-    .replace(/\(.*?\)/g, '')   // remove parentheses
-    .replace(/[-–|•]+.*/g, '') // drop trailing bullet/ dash text
+    .replace(/\(.*?\)/g, '')    // remove parentheses
+    .replace(/[-–|•]+.*/g, '')   // drop trailing bullet/ dash text
     .trim();
 
 // Call your WP product‐search endpoint
@@ -37,7 +37,6 @@ async function searchWordPressProducts(query) {
 // Use Gemini to pick out which products match this material/tool request
 async function classifyProducts(materialName, products, genAI) {
   if (!products.length) return [];
-  // if few candidates, just return all
   if (products.length <= 3) return products.map(p => String(p.id));
 
   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
@@ -46,14 +45,12 @@ async function classifyProducts(materialName, products, genAI) {
     .join('\n');
 
   const prompt = `
-You are a product-matching assistant. The user needs: "${materialName}".
+You are a product-matching assistant. The user needs exactly: "${materialName}".
 Here are candidate products (ID: Name — Description):
 ${listText}
 
-Rules:
-1. Select **only** those IDs whose technical specification or description clearly matches the requested item.
-2. Ignore any color/finish variants or unrelated items.
-3. Respond with a JSON array of IDs, e.g. ["93242","93246"] and nothing else.
+Select **only** those IDs whose name or technical description clearly matches that request.
+Do NOT pick unrelated items. Respond with a JSON array of IDs, e.g. ["93242","93246"], and nothing else.
   `.trim();
 
   try {
@@ -148,37 +145,13 @@ export default async function handler(req, res) {
         products = Array.from(new Map(all.map(p => [p.id, p])).values());
       }
 
-      // d) Drop “colour” variants only
+      // d) Drop pure “colour” variants only
       products = products.filter(p => !/colour\b/i.test(p.name));
 
-      // e) AI-classify relevance (now allows tools if asked)
-      const keepIds = await classifyProducts(materialName, products, genAI);
-      if (keepIds.length) {
-        products = products.filter(p => keepIds.includes(String(p.id)));
-      }
-
-      // f) Fallback if none
-      if (!products.length) {
-        finalMaterials.push({
-          ...mat,
-          name: materialName,
-          options: [
-            {
-              id: `manual-${baseQuery.replace(/\s+/g, '-')}`,
-              name: materialName,
-              image: null,
-              description: '❌ No matches—please manually price this item.',
-              link: null,
-            },
-          ],
-        });
-        continue;
-      }
-
-      // g) Fuzzy-score
-      const cleanedMat = baseQuery.toLowerCase();
+      // e) Fuzzy-match first
+      const cleanMatLC = baseQuery.toLowerCase();
       const targets = products.map(p => cleanTitle(p.name).toLowerCase());
-      const { ratings } = stringSimilarity.findBestMatch(cleanedMat, targets);
+      const { ratings } = stringSimilarity.findBestMatch(cleanMatLC, targets);
       const scored = ratings
         .map(r => {
           const prod = products.find(
@@ -186,15 +159,24 @@ export default async function handler(req, res) {
           );
           return prod ? { score: r.rating, product: prod } : null;
         })
-        .filter(e => e)
+        .filter(Boolean)
         .sort((a, b) => b.score - a.score);
 
-      // h) Threshold .6
-      const threshold = 0.6;
-      let chosen = scored.filter(e => e.score >= threshold).map(e => e.product);
-      if (!chosen.length) chosen = scored.map(e => e.product);
+      // choose those ≥0.4 right away
+      let chosen = scored.filter(e => e.score >= 0.4).map(e => e.product);
 
-      // i) Build options list
+      // f) Only if fuzzy finds nothing, call AI‐classify
+      if (!chosen.length) {
+        const keepIds = await classifyProducts(materialName, products, genAI);
+        if (keepIds.length) {
+          chosen = products.filter(p => keepIds.includes(String(p.id)));
+        } else {
+          // final fallback: top 3 fuzzy (even if score < threshold)
+          chosen = scored.slice(0, 3).map(e => e.product);
+        }
+      }
+
+      // g) Build options list (with manual placeholder first)
       const placeholder = {
         id: `manual-${baseQuery.replace(/\s+/g, '-')}`,
         name: materialName,
