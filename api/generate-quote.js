@@ -5,7 +5,7 @@ import stringSimilarity from 'string-similarity';
 
 // ——— Helpers ———————————————————————————————————————————————
 
-// Strip out sizes, “pack of…”, parentheses, etc.
+// Strip out sizes (“pack of…”, dimensions, units), parentheses, trailing bullets/dashes
 const cleanTitle = (title = '') =>
   title
     .replace(
@@ -34,32 +34,31 @@ async function searchWordPressProducts(query) {
   }
 }
 
-// Use Gemini to pick out which products actually match this material
+// Use Gemini to pick out which products match this material/tool request
 async function classifyProducts(materialName, products, genAI) {
   if (!products.length) return [];
+  // if few candidates, just return all
+  if (products.length <= 3) return products.map(p => String(p.id));
 
   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-
-  // Build a simple list for the prompt
   const listText = products
-    .map((p) =>
-      `${p.id}: ${p.name} — ${p.description.replace(/\n/g, ' ')}`
-    )
+    .map(p => `${p.id}: ${p.name} — ${p.description.replace(/\n/g, ' ')}`)
     .join('\n');
 
   const prompt = `
-You are a product‐matching assistant. The user needs material: "${materialName}".
+You are a product-matching assistant. The user needs: "${materialName}".
 Here are candidate products (ID: Name — Description):
 ${listText}
 
-Select **only** those IDs whose product best matches that material request.
-Respond with a JSON array of IDs, e.g. ["93242","93246"] and nothing else.
+Rules:
+1. Select **only** those IDs whose technical specification or description clearly matches the requested item.
+2. Ignore any color/finish variants or unrelated items.
+3. Respond with a JSON array of IDs, e.g. ["93242","93246"] and nothing else.
   `.trim();
 
   try {
     const result = await model.generateContent(prompt);
     const text = result.response.text().trim();
-    // extract JSON array
     const json = text.substring(text.indexOf('['), text.lastIndexOf(']') + 1);
     const arr = JSON.parse(json);
     if (Array.isArray(arr)) return arr.map(String);
@@ -113,15 +112,11 @@ export default async function handler(req, res) {
 
     const genAI = new GoogleGenerativeAI(process.env.VITE_GOOGLE_API_KEY);
 
-    // 1) What kind of project?
+    // 1) Determine project type
     const projectType = await getProjectType(jobDescription, genAI);
 
-    // 2) Get the AI‐generated plan
-    const plan = await generateExpertPlan(
-      jobDescription,
-      projectType,
-      genAI
-    );
+    // 2) Generate plan
+    const plan = await generateExpertPlan(jobDescription, projectType, genAI);
 
     // 3) Safely extract
     const materialsList = Array.isArray(plan.materials) ? plan.materials : [];
@@ -143,31 +138,26 @@ export default async function handler(req, res) {
       // b) Fetch candidates
       let products = await searchWordPressProducts(baseQuery);
 
-      // c) If none, try word‐by‐word union
+      // c) If none, try word-by-word union
       if (!products.length) {
-        const words = baseQuery.split(/\s+/).filter((w) => w.length > 3);
+        const words = baseQuery.split(/\s+/).filter(w => w.length > 3);
         const all = [];
         for (const w of words) {
           all.push(...(await searchWordPressProducts(w)));
         }
-        // dedupe by ID
-        products = Array.from(new Map(all.map((p) => [p.id, p])).values());
+        products = Array.from(new Map(all.map(p => [p.id, p])).values());
       }
 
-      // d) Drop any “colour” items
-      products = products.filter((p) => !/colour\b/i.test(p.name));
+      // d) Drop “colour” variants only
+      products = products.filter(p => !/colour\b/i.test(p.name));
 
-      // e) Ask AI to classify relevance
-      const keepIds = await classifyProducts(
-        materialName,
-        products,
-        genAI
-      );
+      // e) AI-classify relevance (now allows tools if asked)
+      const keepIds = await classifyProducts(materialName, products, genAI);
       if (keepIds.length) {
-        products = products.filter((p) => keepIds.includes(String(p.id)));
+        products = products.filter(p => keepIds.includes(String(p.id)));
       }
 
-      // f) If STILL none, fallback
+      // f) Fallback if none
       if (!products.length) {
         finalMaterials.push({
           ...mat,
@@ -177,8 +167,7 @@ export default async function handler(req, res) {
               id: `manual-${baseQuery.replace(/\s+/g, '-')}`,
               name: materialName,
               image: null,
-              description:
-                '❌ No matches—please manually price this item.',
+              description: '❌ No matches—please manually price this item.',
               link: null,
             },
           ],
@@ -186,34 +175,26 @@ export default async function handler(req, res) {
         continue;
       }
 
-      // g) Fuzzy‐score them all
+      // g) Fuzzy-score
       const cleanedMat = baseQuery.toLowerCase();
-      const targets = products.map((p) =>
-        cleanTitle(p.name).toLowerCase()
-      );
-      const { ratings } = stringSimilarity.findBestMatch(
-        cleanedMat,
-        targets
-      );
+      const targets = products.map(p => cleanTitle(p.name).toLowerCase());
+      const { ratings } = stringSimilarity.findBestMatch(cleanedMat, targets);
       const scored = ratings
-        .map((r) => ({
-          score: r.rating,
-          product: products.find(
-            (p) =>
-              cleanTitle(p.name).toLowerCase() === r.target
-          ),
-        }))
-        .filter((e) => e.product)
+        .map(r => {
+          const prod = products.find(
+            p => cleanTitle(p.name).toLowerCase() === r.target
+          );
+          return prod ? { score: r.rating, product: prod } : null;
+        })
+        .filter(e => e)
         .sort((a, b) => b.score - a.score);
 
-      // h) Threshold .5 or keep all if none pass
-      const threshold = 0.5;
-      let chosen = scored
-        .filter((e) => e.score >= threshold)
-        .map((e) => e.product);
-      if (!chosen.length) chosen = scored.map((e) => e.product);
+      // h) Threshold .6
+      const threshold = 0.6;
+      let chosen = scored.filter(e => e.score >= threshold).map(e => e.product);
+      if (!chosen.length) chosen = scored.map(e => e.product);
 
-      // i) Build options list (original first)
+      // i) Build options list
       const placeholder = {
         id: `manual-${baseQuery.replace(/\s+/g, '-')}`,
         name: materialName,
@@ -223,7 +204,7 @@ export default async function handler(req, res) {
       };
       const options = [
         placeholder,
-        ...chosen.map((p) => ({
+        ...chosen.map(p => ({
           id: p.id,
           name: cleanTitle(p.name),
           image: p.image,
