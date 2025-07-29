@@ -1,6 +1,8 @@
 // src/ProductDropdown.jsx
 import React, { useState, useEffect } from 'react';
 
+const PLACEHOLDER_IMAGE = '/placeholder-image.png'; // ensure this file exists in public/
+
 export default function ProductDropdown({ options = [], value = '', onChange }) {
   const [selected, setSelected] = useState(value);
 
@@ -40,17 +42,11 @@ export default function ProductDropdown({ options = [], value = '', onChange }) 
             title={opt.name}
             aria-label={opt.name}
           >
-            {opt.image ? (
-              <img
-                src={opt.image}
-                alt={opt.name}
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <div className="text-[10px] text-gray-500 text-center px-1">
-                No image
-              </div>
-            )}
+            <img
+              src={opt.image || PLACEHOLDER_IMAGE}
+              alt={opt.name}
+              className="w-full h-full object-cover"
+            />
           </div>
         ))}
       </div>

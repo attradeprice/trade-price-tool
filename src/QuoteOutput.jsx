@@ -18,8 +18,8 @@ export default function QuoteOutput({ quote, setQuote, onAddToCart, selectedTier
   const totalMaterialsCost = useMemo(() => {
     if (!quote?.materials) return 0;
     return quote.materials.reduce((sum, item) => {
-      const price = parseFloat(item.unitPrice || 0);
-      return sum + price * item.quantity;
+      const unitPrice = parseFloat(item.unitPrice || 0);
+      return sum + unitPrice * item.quantity;
     }, 0);
   }, [quote]);
 
@@ -62,7 +62,7 @@ export default function QuoteOutput({ quote, setQuote, onAddToCart, selectedTier
         <div className="flex gap-2 flex-wrap items-center">
           <button
             onClick={downloadPdf}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded"
+            className="bg-[#275262] hover:bg-[#1e3d4f] text-white px-4 py-2 rounded"
           >
             Download PDF
           </button>
@@ -100,19 +100,15 @@ export default function QuoteOutput({ quote, setQuote, onAddToCart, selectedTier
             <QuoteTable
               materials={quote.materials}
               totalCost={totalMaterialsCost}
-              onAddToCart={(id, selectedName) => {
+              selectedMaterials={quote.selectedMaterials || {}}
+              onAddToCart={(id, selectedOption) => {
                 const updated = {
                   ...(quote.selectedMaterials || {}),
-                  [id]: selectedName,
+                  [id]: selectedOption,
                 };
-
-                const updatedQuote = {
-                  ...quote,
-                  selectedMaterials: updated,
-                };
-
+                const updatedQuote = { ...quote, selectedMaterials: updated };
                 setQuote(updatedQuote);
-                onAddToCart(id, selectedName);
+                onAddToCart(id, selectedOption);
               }}
             />
           </section>
