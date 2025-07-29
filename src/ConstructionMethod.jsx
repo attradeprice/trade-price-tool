@@ -1,3 +1,4 @@
+// src/ConstructionMethod.jsx
 import React from 'react';
 
 export default function ConstructionMethod({ method }) {

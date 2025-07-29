@@ -1,9 +1,56 @@
 // src/QuoteDetailsForm.jsx
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 
-export default function QuoteDetailsForm({ companyDetails, setCompanyDetails, customerDetails, setCustomerDetails, vatRate, setVatRate, logo, setLogo }) {
+export default function QuoteDetailsForm({
+  companyDetails,
+  setCompanyDetails,
+  customerDetails,
+  setCustomerDetails,
+  vatRate,
+  setVatRate,
+  logo,
+  setLogo,
+}) {
+  const [errors, setErrors] = useState({});
+
+  useEffect(() => {
+    const savedCompany = localStorage.getItem('companyDetails');
+    const savedCustomer = localStorage.getItem('customerDetails');
+    const savedVat = localStorage.getItem('vatRate');
+
+    if (savedCompany) setCompanyDetails(JSON.parse(savedCompany));
+    if (savedCustomer) setCustomerDetails(JSON.parse(savedCustomer));
+    if (savedVat) setVatRate(Number(savedVat));
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('companyDetails', JSON.stringify(companyDetails));
+  }, [companyDetails]);
+
+  useEffect(() => {
+    localStorage.setItem('customerDetails', JSON.stringify(customerDetails));
+  }, [customerDetails]);
+
+  useEffect(() => {
+    localStorage.setItem('vatRate', vatRate);
+  }, [vatRate]);
+
+  const validate = (name, value) => {
+    if (!value.trim()) {
+      setErrors((prev) => ({ ...prev, [name]: 'Required field' }));
+    } else {
+      setErrors((prev) => {
+        const updated = { ...prev };
+        delete updated[name];
+        return updated;
+      });
+    }
+  };
+
   const handleChange = (e, setter, obj) => {
-    setter({ ...obj, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    setter({ ...obj, [name]: value });
+    validate(name, value);
   };
 
   const handleLogoChange = (e) => {
@@ -23,16 +70,20 @@ export default function QuoteDetailsForm({ companyDetails, setCompanyDetails, cu
           value={companyDetails.name}
           onChange={(e) => handleChange(e, setCompanyDetails, companyDetails)}
           placeholder="Company Name"
-          className="w-full mb-2 p-2 border rounded"
+          className="w-full mb-1 p-2 border rounded"
         />
+        {errors.name && <p className="text-xs text-red-600 mb-1">{errors.name}</p>}
+
         <input
           type="text"
           name="address"
           value={companyDetails.address}
           onChange={(e) => handleChange(e, setCompanyDetails, companyDetails)}
           placeholder="Company Address"
-          className="w-full mb-2 p-2 border rounded"
+          className="w-full mb-1 p-2 border rounded"
         />
+        {errors.address && <p className="text-xs text-red-600 mb-1">{errors.address}</p>}
+
         <input
           type="file"
           accept="image/*"
@@ -50,24 +101,30 @@ export default function QuoteDetailsForm({ companyDetails, setCompanyDetails, cu
           value={customerDetails.name}
           onChange={(e) => handleChange(e, setCustomerDetails, customerDetails)}
           placeholder="Customer Name"
-          className="w-full mb-2 p-2 border rounded"
+          className="w-full mb-1 p-2 border rounded"
         />
+        {errors.name && <p className="text-xs text-red-600 mb-1">{errors.name}</p>}
+
         <input
           type="text"
           name="address"
           value={customerDetails.address}
           onChange={(e) => handleChange(e, setCustomerDetails, customerDetails)}
           placeholder="Customer Address"
-          className="w-full mb-2 p-2 border rounded"
+          className="w-full mb-1 p-2 border rounded"
         />
+        {errors.address && <p className="text-xs text-red-600 mb-1">{errors.address}</p>}
+
         <input
           type="number"
           value={vatRate}
           onChange={(e) => setVatRate(Number(e.target.value))}
           placeholder="VAT Rate (%)"
-          className="w-full mb-2 p-2 border rounded"
+          min="0"
+          max="100"
+          className="w-full mb-1 p-2 border rounded"
         />
       </div>
     </div>
   );
-} 
+}

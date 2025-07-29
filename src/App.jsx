@@ -1,4 +1,3 @@
-// src/App.jsx
 import React, { useState, useEffect } from 'react';
 import JobInput from './JobInput';
 import QuoteDetailsForm from './QuoteDetailsForm';
@@ -20,8 +19,15 @@ export default function App() {
     const saved = localStorage.getItem('atp_last_quote');
     if (saved) setQuote(JSON.parse(saved));
 
-    const urlParams = new URLSearchParams(window.location.search);
-    const qParam = urlParams.get('quote');
+    const savedCompany = localStorage.getItem('companyDetails');
+    const savedCustomer = localStorage.getItem('customerDetails');
+    const savedVat = localStorage.getItem('vatRate');
+
+    if (savedCompany) setCompanyDetails(JSON.parse(savedCompany));
+    if (savedCustomer) setCustomerDetails(JSON.parse(savedCustomer));
+    if (savedVat) setVatRate(Number(savedVat));
+
+    const qParam = new URLSearchParams(window.location.search).get('quote');
     if (qParam && localStorage.getItem(`quote_${qParam}`)) {
       setQuote(JSON.parse(localStorage.getItem(`quote_${qParam}`)));
     }
@@ -36,6 +42,18 @@ export default function App() {
     }
   }, [quote]);
 
+  useEffect(() => {
+    localStorage.setItem('companyDetails', JSON.stringify(companyDetails));
+  }, [companyDetails]);
+
+  useEffect(() => {
+    localStorage.setItem('customerDetails', JSON.stringify(customerDetails));
+  }, [customerDetails]);
+
+  useEffect(() => {
+    localStorage.setItem('vatRate', vatRate);
+  }, [vatRate]);
+
   const handleGenerateQuote = async () => {
     setIsLoading(true);
     setQuote(null);
@@ -49,13 +67,16 @@ export default function App() {
       const result = await response.json();
 
       const customerQuote = {
-        quoteNumber: `Q-${Math.floor(1000 + Math.random() * 9000)}`,
+        quoteNumber: `Q-${Date.now()}`,
         date: new Date().toLocaleDateString('en-GB'),
         projectDescription: jobDescription,
-        materialsCost: 0,
-        labourCost: 0,
-        vat: 0,
-        total: 0,
+        projectSummary: result.method?.summary || '',
+        labourHours: 0,
+        hourlyRate: 25,
+        vatRate: vatRate / 100,
+        company: companyDetails,
+        customer: customerDetails,
+        logo: logo || null,
       };
 
       setQuote({ ...result, customerQuote });
@@ -68,7 +89,15 @@ export default function App() {
   };
 
   const handleAddToCart = (materialId, selected) => {
-    console.log(`Selected material ${materialId}: ${selected}`);
+    if (!selected) return;
+    const updatedQuote = {
+      ...quote,
+      selectedMaterials: {
+        ...(quote.selectedMaterials || {}),
+        [materialId]: selected,
+      },
+    };
+    setQuote(updatedQuote);
   };
 
   return (
@@ -103,7 +132,12 @@ export default function App() {
 
         <GenerateButton loading={isLoading} onClick={handleGenerateQuote} />
 
-        <QuoteOutput quote={quote} onAddToCart={handleAddToCart} />
+        <QuoteOutput
+          quote={quote}
+          setQuote={setQuote}
+          selectedTier={selectedTier}
+          onAddToCart={handleAddToCart}
+        />
       </div>
     </div>
   );
