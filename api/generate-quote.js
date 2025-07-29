@@ -1,12 +1,13 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import stringSimilarity from 'string-similarity';
 
-// --- Helper: Strip sizes, “pack of”, etc. for matching and display
+// --- Helper: Clean product titles for search & display
 const cleanTitle = (title = '') =>
   title
+    // remove "pack of 6", "900mm", "1.8m x 1.8m", weights, areas, etc.
     .replace(/(pack of\s*\d+|\d+\s?(x|×)\s?\d+\s?(mm|cm|m)?|\d+(mm|cm|m|kg|ltr|sqm|m²)|bulk|single|each)/gi, '')
-    .replace(/\(.*?\)/g, '')
-    .replace(/[-–|•]+.*/g, '')
+    .replace(/\(.*?\)/g, '')     // remove anything in parentheses
+    .replace(/[-–|•]+.*/g, '')   // drop text after dashes/bullets
     .trim();
 
 // --- WordPress product search
@@ -47,7 +48,7 @@ async function generateExpertPlan(jobDescription, projectType, genAI) {
   return JSON.parse(json);
 }
 
-// --- Main handler
+// --- Main API handler
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' });
@@ -64,10 +65,10 @@ export default async function handler(req, res) {
     // 1) Determine project type
     const projectType = await getProjectType(jobDescription, genAI);
 
-    // 2) Get the AI plan
+    // 2) Generate AI plan
     const plan = await generateExpertPlan(jobDescription, projectType, genAI);
 
-    // 3) Safely extract materials, method, and customerQuote
+    // 3) Safe defaults
     const materialsList = Array.isArray(plan.materials) ? plan.materials : [];
     const method = plan.method && typeof plan.method === 'object'
       ? plan.method
@@ -78,20 +79,24 @@ export default async function handler(req, res) {
     const labourHours = Number(cq.labourHours) || 0;
     const labourRate  = Number(cq.labourRate)  || 35;
 
-    // 4) For each material, search WP and build options
+    // 4) Build final materials with product options
     const finalMaterials = [];
     for (const mat of materialsList) {
+      // support .name or .item from AI
       const materialName = mat?.name?.trim?.() || mat?.item?.trim?.();
       if (!materialName) continue;
 
-      const products = await searchWordPressProducts(materialName);
-      // If no WP results, immediately fallback
+      // Strip dimensions before searching
+      const queryTerm = cleanTitle(materialName);
+      const products  = await searchWordPressProducts(queryTerm);
+
       if (!Array.isArray(products) || products.length === 0) {
+        // fallback if nothing found
         finalMaterials.push({
           ...mat,
           name: materialName,
           options: [{
-            id: `manual-${materialName.replace(/\s+/g, '-')}`,
+            id: `manual-${queryTerm.replace(/\s+/g, '-')}`,
             name: materialName,
             image: null,
             description: '❌ Not found — please manually price this item.',
@@ -101,20 +106,18 @@ export default async function handler(req, res) {
         continue;
       }
 
-      // Fuzzy-match the top 5
-      const cleanedMat = cleanTitle(materialName);
+      // fuzzy-match top 5
+      const cleanedMat = queryTerm;
       const targets = products.map(p => cleanTitle(p.name));
       const { ratings } = stringSimilarity.findBestMatch(cleanedMat, targets);
+
       const topMatches = ratings
         .sort((a, b) => b.rating - a.rating)
         .slice(0, 5)
-        .map(r => {
-          // find the original product whose cleaned title matches
-          return products.find(p => cleanTitle(p.name) === r.target);
-        })
+        .map(r => products.find(p => cleanTitle(p.name) === r.target))
         .filter(Boolean);
 
-      // Build the options array
+      // assemble options
       const options = topMatches.map(p => ({
         id: p.id,
         name: cleanTitle(p.name),
@@ -130,7 +133,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // 5) Assemble final quote
+    // 5) Compile and return quote
     const quote = {
       materials: finalMaterials,
       method,
@@ -145,6 +148,7 @@ export default async function handler(req, res) {
     };
 
     return res.status(200).json(quote);
+
   } catch (err) {
     console.error('Error in /api/generate-quote:', err);
     return res.status(500).json({ error: 'Failed to generate quote', details: err.message });
