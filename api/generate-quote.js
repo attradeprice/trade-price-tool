@@ -17,14 +17,12 @@ const stopWords = new Set([
  * @returns {string} A space-separated string of keywords.
  */
 const extractKeywords = (text) => {
-  // Normalize text and filter out stop words and short words.
   const words = text
     .toLowerCase()
-    .replace(/[^\w\s]/g, '') // Remove punctuation
+    .replace(/[^\w\s]/g, '')
     .split(/\s+/)
     .filter((w) => !stopWords.has(w) && w.length > 2);
 
-  // A dictionary to expand common terms to related product keywords.
   const synonyms = {
     patio: 'paving stone slab flags patio',
     fencing: 'fence panel post timber gravelboard',
@@ -33,7 +31,6 @@ const extractKeywords = (text) => {
     wall: 'bricks blocks render pier footing coping',
   };
 
-  // Expand the initial set of words with synonyms.
   const expanded = new Set(words);
   words.forEach((w) => {
     if (synonyms[w]) {
@@ -46,14 +43,13 @@ const extractKeywords = (text) => {
 
 /**
  * Cleans a product title to create a generic base name for grouping.
- * e.g., "Sandstone Paving Slabs (22mm)" -> "Sandstone Paving Slabs"
  * @param {string} title - The full product title.
  * @returns {string} The cleaned, base name of the product.
  */
 const cleanTitle = (title) =>
   title
-    .replace(/\s?[\d.]+(m|mm|kg|m²|sqm|inch|")/gi, '') // Remove measurements
-    .replace(/(\s+–\s+.*|\(.*\))/gi, '') // [!important] Improved to better handle SKUs
+    .replace(/\s?[\d.]+(m|mm|kg|m²|sqm|inch|")/gi, '')
+    .replace(/(\s+–\s+.*|\(.*\))/gi, '')
     .trim();
 
 /**
@@ -63,14 +59,14 @@ const cleanTitle = (title) =>
  */
 const groupProducts = (results) => {
   const groups = {};
-  if (!Array.isArray(results)) return groups; // Return empty object if results is not an array
+  if (!Array.isArray(results)) return groups;
   results.forEach((p) => {
     const baseName = cleanTitle(p.name);
     if (!groups[baseName]) {
       groups[baseName] = [];
     }
     groups[baseName].push({
-      id: p.id, // This should be the product ID from WordPress
+      id: p.id,
       name: p.name,
       image: p.image || null,
       description: p.description || '',
@@ -113,71 +109,85 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Missing job description' });
     }
 
-    // 1. Search for relevant products on the WordPress site.
     const keywords = extractKeywords(jobDescription);
     const searchResults = await searchWordPressProducts(keywords);
     const groupedProducts = groupProducts(searchResults);
 
-    // 2. Format the product data for the AI, providing clear categories and variants.
     const structuredProductData = Object.entries(groupedProducts).map(([baseName, variants]) => {
       const variantDetails = variants.map(v => `- ${v.name} (ID: ${v.id})`).join('\n');
       return `Category: "${baseName}"\nVariants:\n${variantDetails}`;
     }).join('\n\n');
 
-    // [!important] Add a fallback instruction if no products are found.
     const materialInstructions = structuredProductData
-      ? `Create a material list. For each required material, you **MUST** use the exact "Category" name (e.g., "Paving Slabs") from the list below. Do not invent new names.`
-      : `Create a GENERIC material list based on the project description as no specific products were found. The user will select specific products later.`;
+      ? `For each material, you MUST use the exact "Category" name from the list below.`
+      : `Create a GENERIC material list as no specific products were found.`;
 
-    // 3. Create a detailed prompt for the AI.
+    // [!important] THIS IS THE NEW, EXPERT-LEVEL PROMPT
     const prompt = `
-You are a UK-based quantity surveyor for a builder's merchant. Your task is to analyze a customer's project description and generate a detailed material list and construction method.
+      You are an expert UK Quantity Surveyor and builder's merchant assistant. Your task is to provide a highly detailed and accurate material quotation and construction method based on a user's project description, adhering strictly to UK building regulations and best practices.
 
-**Project Description:**
-"${jobDescription}"
+      **USER'S PROJECT DESCRIPTION:**
+      "${jobDescription}"
 
-**Available Material Categories and Their Variants:**
-${structuredProductData || "None found. Please generate a generic list."}
+      **AVAILABLE PRODUCTS FROM OUR WEBSITE:**
+      ${structuredProductData || "No specific products found. Please specify generic materials."}
 
-**Instructions:**
-1.  Rewrite the project description into a professional summary for the customer.
-2.  ${materialInstructions}
-3.  Estimate the quantity and appropriate unit for each material.
-4.  Estimate the total labour hours required.
-5.  Provide a step-by-step construction method based on UK building best practices.
-6.  List any important considerations or potential issues.
+      **YOUR TASK:**
+      Analyze the user's request and generate a JSON object with the following structure. You must follow all rules and calculations precisely.
 
-**Output Format:**
-Respond **only** with a single, valid JSON object. Do not include any other text or markdown formatting.
+      **RULES & CALCULATIONS (MANDATORY):**
+      1.  **Sub-Base:** Assume a standard sub-base depth of 150mm (100mm for MOT Type 1, 50mm for sharp sand).
+      2.  **MOT Type 1:** Calculate volume (Area x 0.1m depth). Convert to tonnes (Volume x 1.8). One bulk bag is 0.8 tonnes. Round UP to the nearest whole bag.
+      3.  **Sharp Sand:** Calculate volume (Area x 0.05m depth). Convert to tonnes (Volume x 1.6). One bulk bag is 0.8 tonnes. Round UP to the nearest whole bag.
+      4.  **Cement:** For a 4:1 mortar mix (sand:cement), the cement required is 1/5th of the sand's weight in tonnes. Convert this to 25kg bags (tonnes * 40). Round UP to the nearest whole bag.
+      5.  **Paving Slabs:** Calculate the area. Add 10% for wastage and cuts.
+      6.  **Weed Membrane:** Must equal the area of the sub-base.
+      7.  **Labour:** Estimate labour at 1.5 hours per square metre for a standard patio.
+      8.  **Method:** The construction steps must be extremely detailed, clear, and written for a novice builder. Mention depths, tools, safety, and timings.
 
-\`\`\`json
-{
-  "materials": [
-    {
-      "name": "string",
-      "quantity": number,
-      "unit": "string"
-    }
-  ],
-  "method": {
-    "steps": [ "string" ],
-    "considerations": [ "string" ]
-  },
-  "customerQuote": {
-    "rewrittenProjectSummary": "string",
-    "labourHours": number
-  }
-}
-\`\`\`
-`;
+      **OUTPUT FORMAT (JSON ONLY):**
+      Respond with nothing but a single, valid JSON object.
 
-    // 4. Call the Generative AI model.
+      \`\`\`json
+      {
+        "materials": [
+          {
+            "name": "string",
+            "quantity": number,
+            "unit": "string"
+          }
+        ],
+        "method": {
+          "steps": [
+            "**Step 1: Site Preparation & Excavation** - Mark out the patio area using pegs and string. Excavate the soil to a depth of 170mm-200mm below the desired finished patio level. This allows for 100-150mm of sub-base, 30-40mm of mortar bed, and the thickness of the paving slab. Ensure the base of the excavation is firm and level.",
+            "**Step 2: Install Edge Restraints** - Install solid edging restraints, such as concrete blocks or timber gravel boards, around the perimeter of the excavated area. Haunch them in place with concrete to ensure they are secure and won't move under pressure.",
+            "**Step 3: Lay Weed Control Membrane** - Lay a geotextile weed control membrane over the entire excavated area, overlapping any joins by at least 150mm. This prevents weed growth while allowing water to drain through.",
+            "**Step 4: Lay and Compact Sub-Base** - Spread a layer of MOT Type 1 aggregate to a compacted depth of 100-150mm. Use a rake to level it. Compact the sub-base thoroughly using a wacker plate, making at least three passes. The finished sub-base should be flat, solid, and well-compacted.",
+            "**Step 5: Prepare the Mortar Bed** - Mix a mortar of 4 parts sharp sand to 1 part cement. It should be a damp, workable consistency - not too wet. Spread the mortar over a section of the sub-base to a depth of 30-40mm.",
+            "**Step 6: Lay the Paving Slabs** - Begin laying the slabs, starting from a corner. Gently tap each slab down into the mortar with a rubber mallet until it is level and firm. Use a spirit level to check for level in all directions. Use tile spacers to ensure consistent 10-15mm gaps between each slab.",
+            "**Step 7: Pointing the Joints** - Once all slabs are laid and the mortar has set (allow at least 24 hours), fill the joints between the slabs with a suitable jointing compound or a semi-dry mortar mix. Press the pointing material firmly into the joints and smooth it off for a clean finish.",
+            "**Step 8: Final Cleaning** - After the jointing material has cured (check manufacturer's instructions), clean the surface of the patio to remove any residue or dirt."
+          ],
+          "considerations": [
+            "Ensure a slight fall (slope) of 1 in 60 away from any buildings to allow for water drainage.",
+            "Check for any underground pipes or cables before excavating.",
+            "Wear appropriate PPE, including safety boots, gloves, and eye protection.",
+            "Do not walk on the patio for at least 48-72 hours after laying to allow the mortar to cure properly."
+          ]
+        },
+        "customerQuote": {
+          "rewrittenProjectSummary": "string",
+          "labourHours": number
+        }
+      }
+      \`\`\`
+      `;
+
     const genAI = new GoogleGenerativeAI(process.env.VITE_GOOGLE_API_KEY);
     const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
     const result = await model.generateContent(prompt);
     const rawResponse = result.response.text();
     
-    // [!important] More robustly clean the AI response to ensure it's valid JSON.
     const startIndex = rawResponse.indexOf('{');
     const endIndex = rawResponse.lastIndexOf('}');
     if (startIndex === -1 || endIndex === -1) {
@@ -186,15 +196,13 @@ Respond **only** with a single, valid JSON object. Do not include any other text
     const jsonString = rawResponse.substring(startIndex, endIndex + 1);
     const json = JSON.parse(jsonString);
 
-    // 5. Match the AI's material list back to the WordPress products.
     if (json.materials) {
       json.materials.forEach((item) => {
         const cleanName = item.name.replace(/"/g, '');
         const matchingGroup = groupedProducts[cleanName];
         
-        item.name = cleanName; // Use the cleaned name for display.
+        item.name = cleanName;
         
-        // Assign the corresponding product variants for the dropdown.
         item.options = matchingGroup && matchingGroup.length ? matchingGroup : [
           {
             id: `manual-${cleanName.replace(/\s+/g, '-')}`,
@@ -206,15 +214,13 @@ Respond **only** with a single, valid JSON object. Do not include any other text
       });
     }
 
-    // 6. Add final details to the quote object.
     if (json.customerQuote) {
         json.customerQuote.quoteNumber = `Q-${Date.now()}`;
         json.customerQuote.date = new Date().toLocaleDateString('en-GB');
-        json.customerQuote.labourRate = 35; // Set a default labour rate
+        json.customerQuote.labourRate = 35;
         json.customerQuote.labourCost = (json.customerQuote.labourHours || 0) * json.customerQuote.labourRate;
     }
 
-    // 7. Send the complete quote object back to the frontend.
     res.status(200).json(json);
 
   } catch (err) {
