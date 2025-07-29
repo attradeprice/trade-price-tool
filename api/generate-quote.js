@@ -1,44 +1,15 @@
-// /api/generate-quote.js
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import stringSimilarity from 'string-similarity';
 
-// --- Helper Functions (Keyword Extraction, Product Grouping) ---
-
-const stopWords = new Set([
-  'a', 'an', 'the', 'in', 'on', 'for', 'with', 'i', 'want', 'to', 'build', 'and', 'is',
-  'it', 'will', 'be', 'area', 'size', 'using', 'out', 'of', 'which', 'currently',
-  'grass', 'metres', 'meter', 'long', 'high', 'by', 'from'
-]);
-
-const extractKeywords = (text) => {
-  const words = text.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(w => !stopWords.has(w) && w.length > 2);
-  const synonyms = {
-    patio: 'paving stone slab flags patio',
-    fencing: 'fence panel post timber gravelboard',
-    cement: 'cement mortar joint filler bonding',
-    aggregate: 'sand gravel ballast mot subbase sub-base hardcore',
-    wall: 'bricks blocks render pier footing coping',
-  };
-  const expanded = new Set(words);
-  words.forEach(w => {
-    if (synonyms[w]) synonyms[w].split(' ').forEach(s => expanded.add(s));
-  });
-  return Array.from(expanded).join(' ');
-};
-
+// --- Helper: Clean title for fuzzy matching & UI clarity
 const cleanTitle = (title) =>
-  title.replace(/\s?[\d.]+(m|mm|kg|m²|sqm|inch|")/gi, '').replace(/(\s+–\s+.*|\(.*\))/gi, '').trim();
+  title
+    .replace(/(pack of\s*\d+|\d+\s?(x|×)\s?\d+\s?(mm|cm|m)?|\d+(mm|cm|m|kg|ltr|sqm|m²)|bulk|single|each)/gi, '')
+    .replace(/\(.*?\)/g, '')
+    .replace(/[-–|•]+.*/g, '')
+    .trim();
 
-const groupProducts = (results) => {
-  const groups = {};
-  if (!Array.isArray(results)) return groups;
-  results.forEach(p => {
-    const baseName = cleanTitle(p.name);
-    if (!groups[baseName]) groups[baseName] = [];
-    groups[baseName].push({ id: p.id, name: p.name, image: p.image, description: p.description });
-  });
-  return groups;
-};
-
+// --- Search products from your WordPress backend
 const searchWordPressProducts = async (query) => {
   const url = `https://attradeprice.co.uk/wp-json/atp/v1/search-products?q=${encodeURIComponent(query)}`;
   try {
@@ -54,75 +25,26 @@ const searchWordPressProducts = async (query) => {
   }
 };
 
-// --- NEW DYNAMIC AI-POWERED LOGIC ---
-
-/**
- * Step 1: Use AI to analyze the user's request and identify the core task.
- */
+// --- AI: Extract task type (e.g., "Fence Installation")
 async function getProjectType(jobDescription, genAI) {
   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-  const prompt = `
-    Analyze the following job description and identify the primary construction or trade task being described.
-    Respond with a short, descriptive phrase. Examples: "Patio Construction", "Fence Installation", "Sink Plumbing", "Carburetor Reassembly", "Roof Tiling".
-    Description: "${jobDescription}"
-    Task:`;
+  const prompt = `Identify the primary construction or trade task for this project: "${jobDescription}". Reply with a short phrase.`;
   const result = await model.generateContent(prompt);
   return result.response.text().trim();
 }
 
-/**
- * Step 2: Use AI with an "expert persona" to generate a detailed, accurate plan.
- */
+// --- AI: Generate expert plan (materials, method, labour)
 async function generateExpertPlan(jobDescription, projectType, genAI) {
   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-  const prompt = `
-    You are a world-class expert in **${projectType}**. Your task is to provide a highly detailed material quotation and construction method based on the user's project, adhering strictly to UK standards and best practices.
-
-    **USER'S PROJECT DESCRIPTION:**
-    "${jobDescription}"
-
-    **YOUR TASK:**
-    Analyze the request and generate a JSON object with the following structure. You must follow all rules precisely.
-
-    **RULES & GUIDELINES:**
-    1.  **Material Names:** Use generic, industry-standard names for materials (e.g., "MOT Type 1", "Sharp Sand", "Cement"). DO NOT include tools like "Wacker Plate" or "Spirit Level" in the material list.
-    2.  **Quantities:** Provide realistic, accurate quantity estimations based on the project description. For common tasks like patios, use standard calculations (e.g., 150mm sub-base, 4:1 mortar mix).
-    3.  **Method:** The construction steps must be extremely detailed, clear, and written for a novice. Explain the 'why' behind each step. Be comprehensive.
-    4.  **Labour:** Provide a realistic estimate of the total labour hours required.
-
-    **OUTPUT FORMAT (JSON ONLY):**
-    Respond with nothing but a single, valid JSON object.
-
-    \`\`\`json
-    {
-      "materials": [
-        {
-          "name": "string",
-          "quantity": number,
-          "unit": "string"
-        }
-      ],
-      "method": {
-        "steps": [ "string" ],
-        "considerations": [ "string" ]
-      },
-      "customerQuote": {
-        "rewrittenProjectSummary": "string",
-        "labourHours": number
-      }
-    }
-    \`\`\`
-    `;
-  
+  const prompt = `You are a UK expert in ${projectType}. Generate a valid JSON object with materials, method steps, considerations, and estimated labour hours based on this project:
+"${jobDescription}".`;
   const result = await model.generateContent(prompt);
-  const rawResponse = result.response.text();
-  const jsonString = rawResponse.substring(rawResponse.indexOf('{'), rawResponse.lastIndexOf('}') + 1);
-  return JSON.parse(jsonString);
+  const raw = result.response.text();
+  const json = raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1);
+  return JSON.parse(json);
 }
 
-
-// --- Main API Handler ---
-
+// --- API Handler
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' });
@@ -136,34 +58,47 @@ export default async function handler(req, res) {
 
     const genAI = new GoogleGenerativeAI(process.env.VITE_GOOGLE_API_KEY);
 
-    // Step 1: Understand what the user wants to do.
     const projectType = await getProjectType(jobDescription, genAI);
-
-    // Step 2: Generate the expert plan based on the project type.
     const plan = await generateExpertPlan(jobDescription, projectType, genAI);
 
-    // Step 3: Search for relevant products on your website.
-    const keywords = extractKeywords(jobDescription);
-    const searchResults = await searchWordPressProducts(keywords);
-    const groupedProducts = groupProducts(searchResults);
+    const finalMaterials = [];
 
-    // Step 4: Match the AI-generated materials with your website's products.
-    const finalMaterials = plan.materials.map(material => {
-      const cleanName = cleanTitle(material.name);
-      const matchingGroup = groupedProducts[cleanName];
-      
-      return {
+    for (const material of plan.materials) {
+      const query = material.name;
+      const products = await searchWordPressProducts(query);
+      console.log(`🔍 Searching for: ${material.name}`);
+      console.log(`📦 Found: ${products.length} matches`);
+
+      const cleanedMaterial = cleanTitle(material.name);
+      const rated = stringSimilarity.findBestMatch(
+        cleanedMaterial,
+        products.map(p => cleanTitle(p.name))
+      );
+
+      const topMatches = rated.ratings
+        .sort((a, b) => b.rating - a.rating)
+        .slice(0, 5)
+        .map(r => products.find(p => cleanTitle(p.name) === r.target))
+        .filter(Boolean);
+
+      finalMaterials.push({
         ...material,
-        options: matchingGroup && matchingGroup.length ? matchingGroup : [{
-          id: `manual-${cleanName.replace(/\s+/g, '-')}`,
-          name: material.name,
-          image: null,
-          description: 'Generic item. Please select a specific product.',
-        }]
-      };
-    });
+        options: topMatches.length > 0
+          ? topMatches.map(p => ({
+              id: p.id,
+              name: cleanTitle(p.name),
+              image: p.image,
+              description: p.description,
+            }))
+          : [{
+              id: `manual-${material.name.replace(/\s+/g, '-')}`,
+              name: material.name,
+              image: null,
+              description: '❌ Not found in product database',
+            }]
+      });
+    }
 
-    // Step 5: Build the final quote object.
     const quote = {
       materials: finalMaterials,
       method: plan.method,
