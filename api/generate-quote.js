@@ -134,22 +134,31 @@ ${descriptions}
 
     const json = JSON.parse(raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
 
-    json.materials.forEach((item) => {
-      const match = getClosestMatch(item.name, grouped);
-      if (match && match.length) {
-        item.options = match;
-      } else {
-        // Provide at least one fallback option so dropdown still shows
-        item.options = [
-          {
-            id: `manual-${item.name}`,
-            name: item.name,
-            image: null,
-            description: '',
-          },
-        ];
-      }
-    });
+    function getBestMatchByWords(name, grouped) {
+  const clean = str => str.toLowerCase().replace(/[^\w\s]/g, '').trim();
+  const keywords = new Set(clean(name).split(/\s+/));
+
+  let bestKey = null;
+  let bestScore = 0;
+
+  for (const [key, products] of Object.entries(grouped)) {
+    const keyWords = new Set(clean(key).split(/\s+/));
+    const matchCount = [...keywords].filter(word => keyWords.has(word)).length;
+    const score = matchCount / keywords.size;
+
+    if (score > bestScore && score >= 0.4) {
+      bestKey = key;
+      bestScore = score;
+    }
+  }
+
+  return bestKey ? grouped[bestKey] : null;
+}
+
+json.materials.forEach((item) => {
+  const match = getBestMatchByWords(item.name, grouped);
+  item.options = match && match.length ? match : Object.values(grouped)[0] || [];
+});
 
     res.status(200).json(json);
   } catch (err) {
