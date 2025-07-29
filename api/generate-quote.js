@@ -1,20 +1,22 @@
+// /api/generate-quote.js
+
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import stringSimilarity from 'string-similarity';
 
-// ——— Helpers —————————————————————————————————————————————
+// ——— Helpers ———————————————————————————————————————————————
 
-// Strip sizes, “pack of”, parentheses, etc.
+// Strip out sizes, “pack of…”, parentheses, etc.
 const cleanTitle = (title = '') =>
   title
     .replace(
       /(pack of\s*\d+|\d+\s?(x|×)\s?\d+\s?(mm|cm|m)?|\d+(mm|cm|m|kg|ltr|sqm|m²)|bulk|single|each)/gi,
       ''
     )
-    .replace(/\(.*?\)/g, '')   // remove anything in parentheses
-    .replace(/[-–|•]+.*/g, '') // drop trailing text after dash/bullet
+    .replace(/\(.*?\)/g, '')   // remove parentheses
+    .replace(/[-–|•]+.*/g, '') // drop trailing bullet/ dash text
     .trim();
 
-// Call your WP REST endpoint
+// Call your WP product‐search endpoint
 async function searchWordPressProducts(query) {
   const url = `https://attradeprice.co.uk/wp-json/atp/v1/search-products?q=${encodeURIComponent(
     query
@@ -32,11 +34,46 @@ async function searchWordPressProducts(query) {
   }
 }
 
-// ——— AI routines ——————————————————————————————————————————
+// Use Gemini to pick out which products actually match this material
+async function classifyProducts(materialName, products, genAI) {
+  if (!products.length) return [];
+
+  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+
+  // Build a simple list for the prompt
+  const listText = products
+    .map((p) =>
+      `${p.id}: ${p.name} — ${p.description.replace(/\n/g, ' ')}`
+    )
+    .join('\n');
+
+  const prompt = `
+You are a product‐matching assistant. The user needs material: "${materialName}".
+Here are candidate products (ID: Name — Description):
+${listText}
+
+Select **only** those IDs whose product best matches that material request.
+Respond with a JSON array of IDs, e.g. ["93242","93246"] and nothing else.
+  `.trim();
+
+  try {
+    const result = await model.generateContent(prompt);
+    const text = result.response.text().trim();
+    // extract JSON array
+    const json = text.substring(text.indexOf('['), text.lastIndexOf(']') + 1);
+    const arr = JSON.parse(json);
+    if (Array.isArray(arr)) return arr.map(String);
+  } catch (e) {
+    console.error('Classification parse failed:', e);
+  }
+  return [];
+}
+
+// ——— AI: Determine project type & plan —————————————————————————
 
 async function getProjectType(desc, genAI) {
   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-  const prompt = `Identify in a few words the primary trade or project type for: "${desc}".`;
+  const prompt = `In a few words, identify the primary trade or construction task for: "${desc}".`;
   const result = await model.generateContent(prompt);
   return result.response.text().trim();
 }
@@ -45,14 +82,16 @@ async function generateExpertPlan(desc, projectType, genAI) {
   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
   const prompt = `
 You are an expert in ${projectType}.
-Based on this project: "${desc}"
-Return **only** a JSON object with:
+Based on this project: "${desc}",
+output **only** a JSON object:
+
 {
   "materials": [ { "name":"string", "quantity":number, "unit":"string" } ],
   "method":   { "steps":[ "string" ], "considerations":[ "string" ] },
   "customerQuote": { "labourHours": number }
 }
-`;
+  `.trim();
+
   const result = await model.generateContent(prompt);
   const raw = result.response.text();
   const json = raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1);
@@ -74,54 +113,61 @@ export default async function handler(req, res) {
 
     const genAI = new GoogleGenerativeAI(process.env.VITE_GOOGLE_API_KEY);
 
-    // 1) Identify project type
+    // 1) What kind of project?
     const projectType = await getProjectType(jobDescription, genAI);
 
-    // 2) Generate materials + plan
-    const plan = await generateExpertPlan(jobDescription, projectType, genAI);
+    // 2) Get the AI‐generated plan
+    const plan = await generateExpertPlan(
+      jobDescription,
+      projectType,
+      genAI
+    );
 
-    // 3) Safely pull out arrays/objects
+    // 3) Safely extract
     const materialsList = Array.isArray(plan.materials) ? plan.materials : [];
-    const method =
-      plan.method && typeof plan.method === 'object'
-        ? plan.method
-        : { steps: [], considerations: [] };
-    const cq =
-      plan.customerQuote && typeof plan.customerQuote === 'object'
-        ? plan.customerQuote
-        : {};
+    const method = plan.method || { steps: [], considerations: [] };
+    const cq = plan.customerQuote || {};
     const labourHours = Number(cq.labourHours) || 0;
     const labourRate = Number(cq.labourRate) || 35;
 
-    // 4) Build materials with ALL relevant products fuzzy-filtered
+    // 4) Build finalMaterials
     const finalMaterials = [];
 
     for (const mat of materialsList) {
       const materialName = (mat.name || mat.item || '').trim();
       if (!materialName) continue;
 
-      // a) Clean off sizes/packs
+      // a) Clean query
       const baseQuery = cleanTitle(materialName);
 
-      // b) Primary search
+      // b) Fetch candidates
       let products = await searchWordPressProducts(baseQuery);
 
-      // c) If nothing, split on words (length>3) and union
+      // c) If none, try word‐by‐word union
       if (!products.length) {
-        const words = baseQuery.split(/\s+/).filter(w => w.length > 3);
+        const words = baseQuery.split(/\s+/).filter((w) => w.length > 3);
         const all = [];
         for (const w of words) {
-          const p = await searchWordPressProducts(w);
-          all.push(...p);
+          all.push(...(await searchWordPressProducts(w)));
         }
         // dedupe by ID
-        products = Array.from(new Map(all.map(p => [p.id, p])).values());
+        products = Array.from(new Map(all.map((p) => [p.id, p])).values());
       }
 
-      // d) Filter out “colour” dyes etc.
-      products = products.filter(p => !/colour\b/i.test(p.name));
+      // d) Drop any “colour” items
+      products = products.filter((p) => !/colour\b/i.test(p.name));
 
-      // e) If STILL none -> manual fallback
+      // e) Ask AI to classify relevance
+      const keepIds = await classifyProducts(
+        materialName,
+        products,
+        genAI
+      );
+      if (keepIds.length) {
+        products = products.filter((p) => keepIds.includes(String(p.id)));
+      }
+
+      // f) If STILL none, fallback
       if (!products.length) {
         finalMaterials.push({
           ...mat,
@@ -131,7 +177,8 @@ export default async function handler(req, res) {
               id: `manual-${baseQuery.replace(/\s+/g, '-')}`,
               name: materialName,
               image: null,
-              description: '❌ Not found – please manually price this item.',
+              description:
+                '❌ No matches—please manually price this item.',
               link: null,
             },
           ],
@@ -139,30 +186,34 @@ export default async function handler(req, res) {
         continue;
       }
 
-      // f) Fuzzy-score ALL returned products
+      // g) Fuzzy‐score them all
       const cleanedMat = baseQuery.toLowerCase();
-      const targets = products.map(p => cleanTitle(p.name).toLowerCase());
-      const { ratings } = stringSimilarity.findBestMatch(cleanedMat, targets);
-
+      const targets = products.map((p) =>
+        cleanTitle(p.name).toLowerCase()
+      );
+      const { ratings } = stringSimilarity.findBestMatch(
+        cleanedMat,
+        targets
+      );
       const scored = ratings
-        .map(r => ({
+        .map((r) => ({
           score: r.rating,
           product: products.find(
-            p => cleanTitle(p.name).toLowerCase() === r.target
+            (p) =>
+              cleanTitle(p.name).toLowerCase() === r.target
           ),
         }))
-        .filter(e => e.product)
+        .filter((e) => e.product)
         .sort((a, b) => b.score - a.score);
 
-      // g) Filter out any with very low relevance (<0.3)
-      const relevant = scored
-        .filter(e => e.score >= 0.3)
-        .map(e => e.product);
+      // h) Threshold .5 or keep all if none pass
+      const threshold = 0.5;
+      let chosen = scored
+        .filter((e) => e.score >= threshold)
+        .map((e) => e.product);
+      if (!chosen.length) chosen = scored.map((e) => e.product);
 
-      // if none pass threshold, use them all
-      const finalList = relevant.length ? relevant : scored.map(e => e.product);
-
-      // h) Build dropdown options, always starting with the original material
+      // i) Build options list (original first)
       const placeholder = {
         id: `manual-${baseQuery.replace(/\s+/g, '-')}`,
         name: materialName,
@@ -172,7 +223,7 @@ export default async function handler(req, res) {
       };
       const options = [
         placeholder,
-        ...finalList.map(p => ({
+        ...chosen.map((p) => ({
           id: p.id,
           name: cleanTitle(p.name),
           image: p.image,
@@ -188,7 +239,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // 5) Compose and return the quote
+    // 5) Return assembled quote
     const quote = {
       materials: finalMaterials,
       method,
