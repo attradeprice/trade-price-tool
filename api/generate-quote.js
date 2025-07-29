@@ -1,7 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import stringSimilarity from 'string-similarity';
 
-// --- Helper: Clean title for fuzzy matching & UI clarity
+// --- Helper: Clean product titles for matching and display
 const cleanTitle = (title) =>
   title
     .replace(/(pack of\s*\d+|\d+\s?(x|×)\s?\d+\s?(mm|cm|m)?|\d+(mm|cm|m|kg|ltr|sqm|m²)|bulk|single|each)/gi, '')
@@ -9,7 +9,7 @@ const cleanTitle = (title) =>
     .replace(/[-–|•]+.*/g, '')
     .trim();
 
-// --- Search products from your WordPress backend
+// --- WordPress product search
 const searchWordPressProducts = async (query) => {
   const url = `https://attradeprice.co.uk/wp-json/atp/v1/search-products?q=${encodeURIComponent(query)}`;
   try {
@@ -25,7 +25,7 @@ const searchWordPressProducts = async (query) => {
   }
 };
 
-// --- AI: Extract task type (e.g., "Fence Installation")
+// --- AI: Identify project type
 async function getProjectType(jobDescription, genAI) {
   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
   const prompt = `Identify the primary construction or trade task for this project: "${jobDescription}". Reply with a short phrase.`;
@@ -44,7 +44,7 @@ async function generateExpertPlan(jobDescription, projectType, genAI) {
   return JSON.parse(json);
 }
 
-// --- API Handler
+// --- Main API handler
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' });
@@ -64,12 +64,17 @@ export default async function handler(req, res) {
     const finalMaterials = [];
 
     for (const material of plan.materials) {
-      const query = material.name;
-      const products = await searchWordPressProducts(query);
-      console.log(`🔍 Searching for: ${material.name}`);
+      const materialName = material?.name?.trim?.();
+      if (!materialName) {
+        console.warn("⚠️ Skipping material with missing name:", material);
+        continue;
+      }
+
+      const products = await searchWordPressProducts(materialName);
+      console.log(`🔍 Searching for: ${materialName}`);
       console.log(`📦 Found: ${products.length} matches`);
 
-      const cleanedMaterial = cleanTitle(material.name);
+      const cleanedMaterial = cleanTitle(materialName);
       const rated = stringSimilarity.findBestMatch(
         cleanedMaterial,
         products.map(p => cleanTitle(p.name))
@@ -83,18 +88,21 @@ export default async function handler(req, res) {
 
       finalMaterials.push({
         ...material,
+        name: materialName,
         options: topMatches.length > 0
           ? topMatches.map(p => ({
               id: p.id,
               name: cleanTitle(p.name),
               image: p.image,
               description: p.description,
+              link: `https://attradeprice.co.uk/?p=${p.id}`
             }))
           : [{
-              id: `manual-${material.name.replace(/\s+/g, '-')}`,
-              name: material.name,
+              id: `manual-${materialName.replace(/\s+/g, '-')}`,
+              name: materialName,
               image: null,
-              description: '❌ Not found in product database',
+              description: '❌ Not found — please manually price this item.',
+              link: null
             }]
       });
     }
