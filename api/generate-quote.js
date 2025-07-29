@@ -63,6 +63,7 @@ const cleanTitle = (title) =>
  */
 const groupProducts = (results) => {
   const groups = {};
+  if (!Array.isArray(results)) return groups; // Return empty object if results is not an array
   results.forEach((p) => {
     const baseName = cleanTitle(p.name);
     if (!groups[baseName]) {
@@ -123,6 +124,11 @@ export default async function handler(req, res) {
       return `Category: "${baseName}"\nVariants:\n${variantDetails}`;
     }).join('\n\n');
 
+    // [!important] Add a fallback instruction if no products are found.
+    const materialInstructions = structuredProductData
+      ? `Create a material list. For each required material, you **MUST** use the exact "Category" name (e.g., "Paving Slabs") from the list below. Do not invent new names.`
+      : `Create a GENERIC material list based on the project description as no specific products were found. The user will select specific products later.`;
+
     // 3. Create a detailed prompt for the AI.
     const prompt = `
 You are a UK-based quantity surveyor for a builder's merchant. Your task is to analyze a customer's project description and generate a detailed material list and construction method.
@@ -131,11 +137,11 @@ You are a UK-based quantity surveyor for a builder's merchant. Your task is to a
 "${jobDescription}"
 
 **Available Material Categories and Their Variants:**
-${structuredProductData}
+${structuredProductData || "None found. Please generate a generic list."}
 
 **Instructions:**
 1.  Rewrite the project description into a professional summary for the customer.
-2.  Create a material list. For each required material, you **MUST** use the exact "Category" name (e.g., "Paving Slabs") from the list above. Do not invent new names.
+2.  ${materialInstructions}
 3.  Estimate the quantity and appropriate unit for each material.
 4.  Estimate the total labour hours required.
 5.  Provide a step-by-step construction method based on UK building best practices.
@@ -171,14 +177,18 @@ Respond **only** with a single, valid JSON object. Do not include any other text
     const result = await model.generateContent(prompt);
     const rawResponse = result.response.text();
     
-    // Clean the AI response to ensure it's valid JSON.
-    const jsonString = rawResponse.replace(/^```json\n/, '').replace(/\n```$/, '');
+    // [!important] More robustly clean the AI response to ensure it's valid JSON.
+    const startIndex = rawResponse.indexOf('{');
+    const endIndex = rawResponse.lastIndexOf('}');
+    if (startIndex === -1 || endIndex === -1) {
+        throw new Error('AI response did not contain a valid JSON object.');
+    }
+    const jsonString = rawResponse.substring(startIndex, endIndex + 1);
     const json = JSON.parse(jsonString);
 
     // 5. Match the AI's material list back to the WordPress products.
     if (json.materials) {
       json.materials.forEach((item) => {
-        // The AI should return the category name (e.g., "Paving Slabs").
         const cleanName = item.name.replace(/"/g, '');
         const matchingGroup = groupedProducts[cleanName];
         
