@@ -85,7 +85,7 @@ async function getProjectType(desc, genAI) {
   const res = await callWithFallback(
     genAI,
     'gemini-1.5-flash',
-    'models/chat-bison-001',
+    'models/text-bison-001',    // <-- fallback corrected here
     prompt
   );
   return res.response.text().trim();
@@ -107,7 +107,7 @@ output **only** a JSON object:
   const res = await callWithFallback(
     genAI,
     'gemini-1.5-flash',
-    'models/chat-bison-001',
+    'models/text-bison-001',    // <-- and here
     prompt
   );
   const raw = res.response.text();
@@ -115,7 +115,8 @@ output **only** a JSON object:
   return JSON.parse(json);
 }
 
-// Use Gemini to pick out which products match this material/tool request
+// ——— AI CLASSIFICATION ——————————————————————————————————————
+
 async function classifyProducts(materialName, products, genAI) {
   if (!products.length) return [];
   if (products.length <= 3) return products.map(p => String(p.id));
@@ -135,7 +136,7 @@ Do NOT pick unrelated items. Respond with a JSON array of IDs, e.g. ["93242","93
   const res = await callWithFallback(
     genAI,
     'gemini-1.5-flash',
-    'models/chat-bison-001',
+    'models/text-bison-001',   // <-- and here too, for classification text-based fallback
     prompt
   );
 
