@@ -1,5 +1,5 @@
 // src/QuoteOutput.jsx
-import React, { useMemo, useRef, useState, useEffect } from 'react';
+import React, { useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import html2pdf from 'html2pdf.js';
 import QuoteTable from './QuoteTable';
 import ConstructionMethod from './ConstructionMethod';
@@ -35,6 +35,21 @@ export default function QuoteOutput({ quote, setQuote, onAddToCart, selectedTier
       .save();
   };
 
+  // 🎯 NEW: build and send cart params
+  const sendToCart = useCallback(() => {
+    const params = new URLSearchParams();
+    let idx = 1;
+    const selected = quote.selectedMaterials || {};
+    Object.entries(selected).forEach(([matId, productName]) => {
+      const mat = quote.materials.find(m => String(m.id) === String(matId));
+      if (!mat) return;
+      params.append(`item_${idx}_name`, productName);
+      params.append(`item_${idx}_qty`, mat.quantity);
+      idx++;
+    });
+    window.location.href = `/quote-cart?${params.toString()}`;
+  }, [quote.materials, quote.selectedMaterials]);
+
   const handleLoadSavedQuote = (key) => {
     const saved = localStorage.getItem(key);
     if (saved) {
@@ -65,6 +80,12 @@ export default function QuoteOutput({ quote, setQuote, onAddToCart, selectedTier
             className="bg-[#275262] hover:bg-[#1e3d4f] text-white px-4 py-2 rounded"
           >
             Download PDF
+          </button>
+          <button
+            onClick={sendToCart}
+            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded"
+          >
+            Send to Quote Cart
           </button>
 
           {savedQuotes.length > 0 && (
