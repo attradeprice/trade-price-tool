@@ -16,7 +16,7 @@ const cleanTitle = (title = '') =>
     .replace(/[-–|•]+.*/g, '')   // drop trailing bullet/ dash text
     .trim();
 
-// Call your WP product‐search endpoint
+// Call your WP product‑search endpoint
 async function searchWordPressProducts(query) {
   const url = `https://attradeprice.co.uk/wp-json/atp/v1/search-products?q=${encodeURIComponent(
     query
@@ -84,7 +84,7 @@ output **only** a JSON object:
 {
   "materials": [ { "name":"string", "quantity":number, "unit":"string" } ],
   "method":   { "steps":[ "string" ], "considerations":[ "string" ] },
-  "customerQuote": { "labourHours": number }
+  "customerQuote": { "labourHours": number, "labourRate": number }
 }
   `.trim();
 
@@ -162,17 +162,28 @@ export default async function handler(req, res) {
         .filter(Boolean)
         .sort((a, b) => b.score - a.score);
 
-      // choose those ≥0.4 right away
-      let chosen = scored.filter(e => e.score >= 0.4).map(e => e.product);
+      // filter to ensure every key query word appears in the product name
+      const queryWords = baseQuery
+        .toLowerCase()
+        .split(/\s+/)
+        .filter(w => w.length > 3);
+      const filtered = scored.filter(({ product }) => {
+        const name = cleanTitle(product.name).toLowerCase();
+        return queryWords.every(w => name.includes(w));
+      });
 
-      // f) Only if fuzzy finds nothing, call AI‐classify
-      if (!chosen.length) {
+      // pick only high-confidence matches
+      const THRESHOLD = 0.6;
+      let chosen = filtered.filter(e => e.score >= THRESHOLD).map(e => e.product);
+
+      // if ambiguous (none or multiple), use AI classifier to disambiguate
+      if (chosen.length !== 1) {
         const keepIds = await classifyProducts(materialName, products, genAI);
         if (keepIds.length) {
           chosen = products.filter(p => keepIds.includes(String(p.id)));
         } else {
-          // final fallback: top 3 fuzzy (even if score < threshold)
-          chosen = scored.slice(0, 3).map(e => e.product);
+          // fallback: top 3 fuzzy from filtered set
+          chosen = filtered.slice(0, 3).map(e => e.product);
         }
       }
 
