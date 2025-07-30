@@ -34,6 +34,31 @@ async function searchWordPressProducts(query) {
   }
 }
 
+/**
+ * Retry helper for AI model calls to handle 503 “model overloaded” errors.
+ */
+async function generateWithRetry(model, prompt, maxRetries = 3) {
+  let attempt = 0;
+  let delay = 1000; // start at 1 second
+  while (attempt < maxRetries) {
+    try {
+      return await model.generateContent(prompt);
+    } catch (e) {
+      // Only retry on 503 errors
+      if (e.status === 503) {
+        console.warn(`Model overloaded, retrying in ${delay}ms (attempt ${attempt + 1})`);
+        await new Promise((r) => setTimeout(r, delay));
+        attempt++;
+        delay *= 2;
+      } else {
+        throw e;
+      }
+    }
+  }
+  // Last attempt (if still failing, will throw)
+  return await model.generateContent(prompt);
+}
+
 // Use Gemini to pick out which products match this material/tool request
 async function classifyProducts(materialName, products, genAI) {
   if (!products.length) return [];
@@ -54,13 +79,13 @@ Do NOT pick unrelated items. Respond with a JSON array of IDs, e.g. ["93242","93
   `.trim();
 
   try {
-    const result = await model.generateContent(prompt);
+    const result = await generateWithRetry(model, prompt);
     const text = result.response.text().trim();
     const json = text.substring(text.indexOf('['), text.lastIndexOf(']') + 1);
     const arr = JSON.parse(json);
     if (Array.isArray(arr)) return arr.map(String);
   } catch (e) {
-    console.error('Classification parse failed:', e);
+    console.error('Classification failed or model error:', e);
   }
   return [];
 }
@@ -70,7 +95,7 @@ Do NOT pick unrelated items. Respond with a JSON array of IDs, e.g. ["93242","93
 async function getProjectType(desc, genAI) {
   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
   const prompt = `In a few words, identify the primary trade or construction task for: "${desc}".`;
-  const result = await model.generateContent(prompt);
+  const result = await generateWithRetry(model, prompt);
   return result.response.text().trim();
 }
 
@@ -88,7 +113,7 @@ output **only** a JSON object:
 }
   `.trim();
 
-  const result = await model.generateContent(prompt);
+  const result = await generateWithRetry(model, prompt);
   const raw = result.response.text();
   const json = raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1);
   return JSON.parse(json);
