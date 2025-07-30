@@ -34,20 +34,21 @@ async function searchWordPressProducts(query) {
   }
 }
 
+// ——— AI Retry & Fallback Helpers ————————————————————————————
+
 /**
- * Retry helper for AI model calls to handle 503 “model overloaded” errors.
+ * Retry up to `maxRetries` on 503 errors with exponential backoff.
  */
 async function generateWithRetry(model, prompt, maxRetries = 3) {
   let attempt = 0;
-  let delay = 1000; // start at 1 second
+  let delay = 1000;
   while (attempt < maxRetries) {
     try {
       return await model.generateContent(prompt);
     } catch (e) {
-      // Only retry on 503 errors
       if (e.status === 503) {
         console.warn(`Model overloaded, retrying in ${delay}ms (attempt ${attempt + 1})`);
-        await new Promise((r) => setTimeout(r, delay));
+        await new Promise(r => setTimeout(r, delay));
         attempt++;
         delay *= 2;
       } else {
@@ -55,52 +56,42 @@ async function generateWithRetry(model, prompt, maxRetries = 3) {
       }
     }
   }
-  // Last attempt (if still failing, will throw)
+  // final attempt (will throw if still 503)
   return await model.generateContent(prompt);
 }
 
-// Use Gemini to pick out which products match this material/tool request
-async function classifyProducts(materialName, products, genAI) {
-  if (!products.length) return [];
-  if (products.length <= 3) return products.map(p => String(p.id));
-
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-  const listText = products
-    .map(p => `${p.id}: ${p.name} — ${p.description.replace(/\n/g, ' ')}`)
-    .join('\n');
-
-  const prompt = `
-You are a product-matching assistant. The user needs exactly: "${materialName}".
-Here are candidate products (ID: Name — Description):
-${listText}
-
-Select **only** those IDs whose name or technical description clearly matches that request.
-Do NOT pick unrelated items. Respond with a JSON array of IDs, e.g. ["93242","93246"], and nothing else.
-  `.trim();
-
+/**
+ * Try primary model, and if it still 503s after retries,
+ * fall back to a secondary model once.
+ */
+async function callWithFallback(genAI, primaryModelId, fallbackModelId, prompt) {
+  const primary = genAI.getGenerativeModel({ model: primaryModelId });
   try {
-    const result = await generateWithRetry(model, prompt);
-    const text = result.response.text().trim();
-    const json = text.substring(text.indexOf('['), text.lastIndexOf(']') + 1);
-    const arr = JSON.parse(json);
-    if (Array.isArray(arr)) return arr.map(String);
-  } catch (e) {
-    console.error('Classification failed or model error:', e);
+    return await generateWithRetry(primary, prompt);
+  } catch (lastError) {
+    if (lastError.status === 503) {
+      console.warn(`Primary model ${primaryModelId} overloaded. Falling back to ${fallbackModelId}.`);
+      const fallback = genAI.getGenerativeModel({ model: fallbackModelId });
+      return await generateWithRetry(fallback, prompt);
+    }
+    throw lastError;
   }
-  return [];
 }
 
 // ——— AI: Determine project type & plan —————————————————————————
 
 async function getProjectType(desc, genAI) {
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
   const prompt = `In a few words, identify the primary trade or construction task for: "${desc}".`;
-  const result = await generateWithRetry(model, prompt);
-  return result.response.text().trim();
+  const res = await callWithFallback(
+    genAI,
+    'gemini-1.5-flash',
+    'models/chat-bison-001',
+    prompt
+  );
+  return res.response.text().trim();
 }
 
 async function generateExpertPlan(desc, projectType, genAI) {
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
   const prompt = `
 You are an expert in ${projectType}.
 Based on this project: "${desc}",
@@ -113,10 +104,50 @@ output **only** a JSON object:
 }
   `.trim();
 
-  const result = await generateWithRetry(model, prompt);
-  const raw = result.response.text();
+  const res = await callWithFallback(
+    genAI,
+    'gemini-1.5-flash',
+    'models/chat-bison-001',
+    prompt
+  );
+  const raw = res.response.text();
   const json = raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1);
   return JSON.parse(json);
+}
+
+// Use Gemini to pick out which products match this material/tool request
+async function classifyProducts(materialName, products, genAI) {
+  if (!products.length) return [];
+  if (products.length <= 3) return products.map(p => String(p.id));
+
+  const listText = products
+    .map(p => `${p.id}: ${p.name} — ${p.description.replace(/\n/g, ' ')}`)
+    .join('\n');
+  const prompt = `
+You are a product-matching assistant. The user needs exactly: "${materialName}".
+Here are candidate products (ID: Name — Description):
+${listText}
+
+Select **only** those IDs whose name or technical description clearly matches that request.
+Do NOT pick unrelated items. Respond with a JSON array of IDs, e.g. ["93242","93246"], and nothing else.
+  `.trim();
+
+  const res = await callWithFallback(
+    genAI,
+    'gemini-1.5-flash',
+    'models/chat-bison-001',
+    prompt
+  );
+
+  try {
+    const text = res.response.text().trim();
+    const json = text.substring(text.indexOf('['), text.lastIndexOf(']') + 1);
+    const arr = JSON.parse(json);
+    if (Array.isArray(arr)) return arr.map(String);
+  } catch (e) {
+    console.error('Classification parse failed:', e);
+  }
+  return [];
 }
 
 // ——— Main handler ——————————————————————————————————————————
@@ -187,11 +218,8 @@ export default async function handler(req, res) {
         .filter(Boolean)
         .sort((a, b) => b.score - a.score);
 
-      // filter to ensure every key query word appears in the product name
-      const queryWords = baseQuery
-        .toLowerCase()
-        .split(/\s+/)
-        .filter(w => w.length > 3);
+      // filter to ensure every key query word appears
+      const queryWords = baseQuery.toLowerCase().split(/\s+/).filter(w => w.length > 3);
       const filtered = scored.filter(({ product }) => {
         const name = cleanTitle(product.name).toLowerCase();
         return queryWords.every(w => name.includes(w));
@@ -201,18 +229,17 @@ export default async function handler(req, res) {
       const THRESHOLD = 0.6;
       let chosen = filtered.filter(e => e.score >= THRESHOLD).map(e => e.product);
 
-      // if ambiguous (none or multiple), use AI classifier to disambiguate
+      // if ambiguous, disambiguate with AI
       if (chosen.length !== 1) {
         const keepIds = await classifyProducts(materialName, products, genAI);
         if (keepIds.length) {
           chosen = products.filter(p => keepIds.includes(String(p.id)));
         } else {
-          // fallback: top 3 fuzzy from filtered set
           chosen = filtered.slice(0, 3).map(e => e.product);
         }
       }
 
-      // g) Build options list (with manual placeholder first)
+      // g) Build options list (manual placeholder first)
       const placeholder = {
         id: `manual-${baseQuery.replace(/\s+/g, '-')}`,
         name: materialName,
@@ -231,11 +258,7 @@ export default async function handler(req, res) {
         })),
       ];
 
-      finalMaterials.push({
-        ...mat,
-        name: materialName,
-        options,
-      });
+      finalMaterials.push({ ...mat, name: materialName, options });
     }
 
     // 5) Return assembled quote
