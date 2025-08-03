@@ -3,8 +3,8 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 // --- Helper to call your intelligent WordPress API ---
-// This function name matches the one in your other React files.
 async function searchWordPressProducts(query) {
+  // Ensure this URL is correct and points to your live site
   const url = `https://attradeprice.co.uk/wp-json/atp/v1/search-products?q=${encodeURIComponent(query)}`;
   try {
     const res = await fetch(url);
@@ -30,7 +30,7 @@ async function getProjectType(desc, genAI) {
 async function generateExpertPlan(desc, projectType, genAI) {
   const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
   const prompt = `
-You are an expert in ${projectType}.
+You are an expert UK quantity surveyor for ${projectType}.
 Based on this project: "${desc}",
 output **only** a JSON object:
 
@@ -59,7 +59,6 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Missing job description' });
     }
 
-    // This uses the VITE_GOOGLE_API_KEY from your environment variables
     const genAI = new GoogleGenerativeAI(process.env.VITE_GOOGLE_API_KEY);
 
     // 1. Determine project type
@@ -77,16 +76,13 @@ export default async function handler(req, res) {
 
     // 4. Find matching products for each material using your new intelligent WordPress API
     const finalMaterials = [];
-
     for (const mat of materialsList) {
       const materialName = (mat.name || '').trim();
       if (!materialName) continue;
 
-      // Call your new, smart API. The results are already highly relevant.
+      // Call your new, smart API. The results should be highly relevant.
       const productMatches = await searchWordPressProducts(materialName);
 
-      // We no longer need the old, complex matching logic.
-      // We can trust the semantically relevant results from the API.
       const options = productMatches.map(p => ({
         id: p.id,
         name: p.name,
